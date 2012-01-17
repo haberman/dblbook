@@ -1,0 +1,42 @@
+
+Double-Booked: A Chrome app for doing double-entry accounting.
+
+This is a Chrome app (a packaged app, specifically) for doing
+double-entry accounting.  It is inspired by the command-line
+program Ledger (http://ledger-cli.org/) but designed to be
+web-based.  My goals are:
+
+- Easy to add your accounts one-by-one.  Ledger puts transactions
+  for all accounts in the same file, which makes you merge this
+  file a lot as you add accounts.
+
+- Balance transactions as you go.  Double-entry accounting dictates
+  that all transactions must balance, but this can be problematic
+  if you are importing accounts one by one.  Double-Booked will
+  let you enter transactions that don't balance, letting you balance
+  them later once you've created/imported the other account.
+
+- Sync your data to the cloud, but cache it locally for performance
+  and offline access.  Current plan is to sync to your Dropbox
+  account so you don't have to trust your data to me.
+
+- Rich visualizations and reports.  Using the rendering engine of
+  HTML5 and SVG, the sky is the limit.  And programmers should be
+  able to write their own easily.
+
+- Lots of import options.  Import from Mint, OFX, etc. or from your
+  bank's website directly (but this would happen in your own browser,
+  so you aren't sending your data anywhere).
+
+The technologies used are:
+
+- Chrome packaged web apps, which let you "install" the app into your
+  browser (all application code is downloaded and lives on your computer).
+  That way I don't have to run any servers and you don't have to trust me
+  with your data.
+
+- HTML5 local storage, for storing your account data locally.
+
+- Dropbox? for syncing your data to the cloud.
+
+- d3 for elegantly expressing data-driven manipulations of the DOM.

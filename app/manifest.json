@@ -1,0 +1,19 @@
+{
+  "name": "Double-Booked",
+  "description": "Double-entry accounting system",
+  "version": "0.1",
+  "permissions": [
+    "contextMenus",
+    "https://wwws.mint.com/"
+  ],
+  "app": {
+    "launch": {
+      "local_path": "main.html"
+    }
+  },
+  // These are just stand-in icons until I can get real ones.
+  "icons": {
+    "16": "icon_16.png",
+    "128": "icon_128.png"
+  }
+}
