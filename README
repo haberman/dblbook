@@ -1,5 +1,5 @@
 
-Double-Booked: A Chrome app for doing double-entry accounting.
+Double-Booked: A Chrome app for double-entry accounting.
 
 This is a Chrome app (a packaged app, specifically) for doing
 double-entry accounting.  It is inspired by the command-line
@@ -40,3 +40,10 @@ The technologies used are:
 - Dropbox? for syncing your data to the cloud.
 
 - d3 for elegantly expressing data-driven manipulations of the DOM.
+
+To try it out:
+
+- in Chrome, go to chrome://settings/extensions and enable "Developer mode"
+  Then click "Load unpacked extension..." and choose the "app" directory.
+  There's currently no way to import data except for editing the local storage
+  SQLite database directly.
