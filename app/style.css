@@ -12,14 +12,20 @@ table {
   border-collapse: collapse;
 }
 
-tr:nth-child(even) {background-color: #FFF}
-tr:nth-child(odd) {background-color: #FFDD88}
+th { background-color: #FEC; height: 27px; }
+tr.locked:nth-child(odd) {background-color: #FAFAFA}
+tr.locked:nth-child(even) {background-color: #FEC}
 
-td {
-  margin: 0;
+td, th {
   padding-left: 15px;
   padding-right: 15px;
   border: 0;
+  height: 27px;
+  /*line-height: 24px;*/
+}
+
+img {
+  vertical-align: middle;
 }
 
 .amount, .balance {

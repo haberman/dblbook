@@ -109,7 +109,9 @@ dblbook.Decimal.prototype.sub = function(other) {
  * @return {String} The string representation.
  */
 dblbook.Decimal.prototype.toString = function() {
-  return (this.value / Math.pow(10, this.precision)).toFixed(this.precision);
+  var str = (this.value / Math.pow(10, this.precision)).toFixed(this.precision);
+  // Add commas.
+  return str.replace(/\B(?=(?:\d{3})+(?!\d))/g, ",");
 };
 
 /**
