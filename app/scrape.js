@@ -1,6 +1,53 @@
 /**
- * @fileoverview Code to define and execute scrapelets, which remotely
- * control and receive data from another browser tab.
+ * @fileoverview Code to define and execute scrapelets, which remotely control
+ * and receive data from another browser tab.  Nothing about the scrapelets
+ * definition is inherently browser-specific, but at the moment only Chrome
+ * support is implemented.
+ *
+ * A scrapelet is a function that returns a series of steps for controlling
+ * another browser window.  Each step is a function that runs inside the
+ * context of the controlled window, which makes it very easy to manipulate the
+ * DOM (particularly forms and buttons) of the target document.  The scrapelet
+ * can also yield JavaScript data back to the controlling tab.  This can be a
+ * relatively robust way of extracting data from websites that don't offer an
+ * API (it is robust as long as the page's HTML structure doesn't change).
+ *
+ * For example, here is a scrapelet that can download a list of accounts from
+ * ING direct, given a username and PIN.
+ *
+ * function getIngAccounts(params) {
+ *   return [
+ *     "https://secure.ingdirect.com",
+ *
+ *     // Login page.
+ *     function() {
+ *       $('#ACNID').val(params.username);
+ *       $('#btn_continue').click();
+ *     },
+ *
+ *     // "Enter PIN" page.
+ *     function() {
+ *       var pin = params.pin;
+ *       for (var i = 0; i < pin.length; i++) {
+ *         var digit = pin.charAt(i);
+ *         if (digit == "0") digit = "zero";
+ *         var elems = $('#clickOnly img[alt="' + digit + '"]');
+ *         elems[0].onmouseup();
+ *       }
+ *       $('#continueButton').click();
+ *     },
+ *
+ *     // "Account Summary" page.
+ *     function(onData) {
+ *       if ($('#tab_eStatementsTab').length == 0) throw "Login failed";
+ *       $('deposittable tbody tr').each(function() {
+ *         // Yield the description back to the controlling tab.
+ *         onData($('.m_type', this).text());
+ *       });
+ *     },
+ *   ];
+ * }
+ *
  * @author jhaberman@gmail.com (Josh Haberman)
  */
 
@@ -48,7 +95,7 @@ function Scrape(jsFile, scrapeletSym, params, onData) {
     chrome.tabs.executeScript(tabId, {"file": "scrape.js"}, b.get());
     chrome.tabs.executeScript(tabId, {"file": "jquery.js"}, b.get());
     b.run(function() {
-      var c = code + 'RunScrapelet(scrapelet, ' + step + ');';
+      var c = code + 'RunScrapeletStep(scrapelet, ' + step + ');';
       chrome.tabs.executeScript(tabId, { "code": c });
     });
   }
@@ -84,9 +131,9 @@ function Scrape(jsFile, scrapeletSym, params, onData) {
 /**
  * The code that runs inside the controlled browser's window.
  */
-function RunScrapelet(scrapelet, step) {
-  // Our goal is to run only after document.onload has run, but there appears
-  // to be no robust way to test this; see:
+function RunScrapeletStep(scrapelet, step) {
+  // Our goal is to run only after document.onload has run in the target, but
+  // there appears to be no robust way to test this; see:
   //   http://code.google.com/p/chromium/issues/detail?id=114890
   //
   // So our best effort is to wait until 100ms after document.readyState is

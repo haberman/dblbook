@@ -18,18 +18,17 @@ banklets.ing = {
 
       // Login page.
       function() {
-        $('#ACNID').val(params["username"]);
+        $('#ACNID').val(params.username);
         $('#btn_continue').click();
       },
 
       // "Enter PIN" page.
       function() {
-        var pin = params["pin"];
+        var pin = params.pin;
         for (var i = 0; i < pin.length; i++) {
           var digit = pin.charAt(i);
           if (digit == "0") digit = "zero";
           var elems = $('#clickOnly img[alt="' + digit + '"]');
-          if (elems.length < 1) throw elems.length;
           elems[0].onmouseup();
         }
         $('#continueButton').click();
@@ -59,8 +58,6 @@ banklets.ing = {
         });
 
         var older = $('#m_historyLinks a:contains("Older >")');
-        console.log(older);
-        console.log(older.length);
         if (older.length > 0) {
           document.location = older[0].href
           return 0;  // Run this step again.
