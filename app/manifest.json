@@ -3,8 +3,8 @@
   "description": "Double-entry accounting system",
   "version": "0.1",
   "permissions": [
-    "contextMenus",
-    "https://wwws.mint.com/"
+    "tabs",
+    "https://secure.ingdirect.com/"
   ],
   "app": {
     "launch": {

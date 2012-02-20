@@ -23,7 +23,7 @@ var accounts = config.accounts.map(function(account) {
 
 function registerRow(txn) {
   return [
-      "<img src='lock.png' style='visibility: hidden'/>",
+      "<i class='icon-lock' style='visibility:hidden'></i>",
       txn.txn.date,
       txn.txn.description,
       new dblbook.Decimal(txn.txn.amount),
@@ -47,16 +47,16 @@ var lockEndRow = 5;
 
 var tr = $('#register tr');
 tr.mouseenter(function() {
-  $(this).find('img')
+  $(this).find('i')
       .css("visibility", "visible")
       .css("opacity", this.sectionRowIndex == lockEndRow ? "1" : "0.4");
 });
 tr.mouseleave(function() {
-  $(this).find('img')
+  $(this).find('i')
       .css("visibility", this.sectionRowIndex == lockEndRow ? "visible" : "hidden");
 });
 
-$('#register img').click(function() {
+$('#register i').click(function() {
   lockEndRow = this.parentNode.parentNode.sectionRowIndex;
   restyleTableForLock();
 });
@@ -65,11 +65,11 @@ function restyleTableForLock() {
   $('#register tbody tr').each(function(i, tr) {
     $(tr).toggleClass("locked", i <= lockEndRow)
     if (i == lockEndRow) {
-      $(tr).find('img')
+      $(tr).find('i')
           .css("visibility", "visible")
           .css("opacity", "1");
     } else {
-      $(tr).find('img')
+      $(tr).find('i')
           .css("visibility", "hidden")
     }
   });

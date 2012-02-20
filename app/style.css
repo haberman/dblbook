@@ -1,33 +1,8 @@
 /* Visual design is not my forte, so ths is not particularly beautiful right
  * now */
 
-body {
-  font: 14px/1.5em "Lucida Grande", Lucida, Verdana, sans-serif;
-}
-
-table {
-  margin-left: auto;
-  margin-right: auto;
-  border: 1px solid black;
-  border-collapse: collapse;
-}
-
-th { background-color: #FEC; height: 27px; }
-tr.locked:nth-child(odd) {background-color: #FAFAFA}
-tr.locked:nth-child(even) {background-color: #FEC}
-
-td, th {
-  padding-left: 15px;
-  padding-right: 15px;
-  border: 0;
-  height: 27px;
-  /*line-height: 24px;*/
-}
-
-img {
-  vertical-align: middle;
-}
-
 .amount, .balance {
-  text-align: right;
+  text-align: right !important;
 }
+
+body { padding-top: 60px; }
