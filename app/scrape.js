@@ -93,7 +93,7 @@ function Scrape(jsFile, scrapeletSym, params, onData) {
     var b = new Barrier()
     chrome.tabs.executeScript(tabId, {"file": jsFile}, b.get());
     chrome.tabs.executeScript(tabId, {"file": "scrape.js"}, b.get());
-    chrome.tabs.executeScript(tabId, {"file": "jquery.js"}, b.get());
+    chrome.tabs.executeScript(tabId, {"file": "lib/jquery.js"}, b.get());
     b.run(function() {
       var c = code + 'RunScrapeletStep(scrapelet, ' + step + ');';
       chrome.tabs.executeScript(tabId, { "code": c });
