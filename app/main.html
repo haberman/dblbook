@@ -11,42 +11,72 @@
     <div class="navbar navbar-fixed-top">
       <div class="navbar-inner">
         <div class="container">
-          <a class="brand" href="#">Double Booked</a>
-          <div class="nav-collapse">
-            <ul class="nav">
-              <li class="active">Accounts</li>
-              <li class="active">Register</li>
-            </ul>
-          </div>
+          <a class="brand" href="#">Cat Accounting</a>
+          <ul id="nav" data-bind="foreach: breadcrumbs">
+            <li><a data-bind="text: label, attr: { href: url }"></a></li>
+          </ul>
         </div>
       </div>
     </div>
 
+    <!-- Templates -->
+    <script type="text/html" id="home">
+      <img src="http://placekitten.com/g/700/400"
+           style="padding:50px; margin-left: auto; margin-right: auto; display:block;" width=700 height=400/>
+      <table id="entities" class="table" style="width: 50%; margin-left: auto; margin-right: auto;">
+        <thead>
+          <tr>
+            <th style="text-align: right">Entity</th>
+            <th>Net Worth</th>
+          </tr>
+        </thead>
+        <tbody data-bind="foreach: entities">
+          <tr>
+            <td style="text-align: right"><a data-bind="text: name, attr: { href: url }"></a></td>
+            <td data-bind="text: netWorth"></td>
+          </tr>
+        </tbody>
+      </table>
+    </script>
+
+    <script type="text/html" id="entity">
+      <h1 data-bind="text: name"/>
+    </script>
+
+    <script type="text/html" id="register">
+      <table data-bind="foreach: register">
+        <tr>
+          <td data-bind="text: date"></td>
+          <td data-bind="text: description"></td>
+          <td data-bind="text: amount"></td>
+          <td data-bind="text: balance"></td>
+        </tr>
+      </table>
+    </script>
+
     <div class="container">
-      <div class="content">
-      <div class="row">
-        <table id="register" class="table table-striped table-bordered">
-          <thead>
-            <tr>
-              <th/>
-              <th>Date</th>
-              <th>Description</th>
-              <th class="amount">Amount</th>
-              <th class="balance">Balance</th>
-            </tr>
-          </thead>
-          <tbody/>
-        </table>
-      </div>
-      </div>
+      <div class="content" id="content" data-bind="template: { name: template, data: data }"/>
     </div>
+    <script type="text/javascript">
+      function loadScript(src) {
+        document.write("\x3Cscript src='" + src + "'>\x3C/script>");
+      }
+      var debug = false;
+      if (debug) {
+        loadScript("lib/knockout.js");
+        loadScript("lib/knockout.mapping.js");
+      } else {
+        loadScript("lib/knockout.debug.js");
+        loadScript("lib/knockout.mapping.debug.js");
+      }
+    </script>
+    <script src="lib/knockout.mapping.debug.js"></script>
     <script src="lib/d3.min.js"></script>
     <script src="lib/jquery.js"></script>
-    <!--script src="jquery-ui.js"></script-->
     <script src="data-model.js"></script>
     <script src="scrape.js"></script>
     <script src="dblbook.js"></script>
-    <script src="secret.js"></script>
+    <!--script src="secret.js"></script-->
     <script src="lib/bootstrap.min.js"></script>
   </body>
 </html>

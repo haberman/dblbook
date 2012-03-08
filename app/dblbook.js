@@ -4,75 +4,140 @@ Array.prototype.last = Array.prototype.last || function() {
     return this[l-1];
 }
 
-var config = JSON.parse(localStorage.getItem("config"));
-
-// Load all accounts, calculate balances.
-var accounts = config.accounts.map(function(account) {
-  var json = localStorage.getItem(account.filename);
-  var txns = json.split("\n").map(function(line) {
-    return JSON.parse(line);
-  });
-  var txns_with_balance = dblbook.calculateBalances(txns, "USD");
-  return {
-    "config": account,
-    "txns": txns,
-    "txns_with_balance": txns_with_balance,
-    "balance": txns_with_balance.last().balance
-  };
-});
-
-function registerRow(txn) {
-  return [
-      "<i class='icon-lock' style='visibility:hidden'></i>",
-      txn.txn.date,
-      txn.txn.description,
-      new dblbook.Decimal(txn.txn.amount),
-      txn.balance
-  ];
+var amountField = {
+  create: function(options) {
+    var ret =  ko.observable(new dblbook.Balance(options.data));
+    return ret;
+  },
+  //update: function(options) {
+  //  return options.data.toString();
+  //},
 }
 
-function registerCellStyles(i) {
-  return new Array("", "", "", "amount", "balance")[i];
+var transactionMapping = {
+  include: ['id', 'date', 'amount', 'description'],
+  ignore: ['balance'],
+  //key: function(data) { return ko.utils.unwrapObservable(data.id) },
+  'amount': amountField,
 }
 
-d3.select("#register tbody").selectAll("tr")
-  .data(accounts[0].txns_with_balance)
-    .enter().append("tr").selectAll("td")
-      .data(function(t) { return registerRow(t) })
-        .enter().append("td")
-          .html(String)
-          .attr("class", function(d, i) { return registerCellStyles(i) })
 
-var lockEndRow = 5;
+/**
+ * The same register can be shared between multiple accounts, so we have a
+ * container object cache and vend these registers.
+ *
+ * @constructor
+ */
+function RegisterCache() {
+  this.registers = {};
+}
 
-var tr = $('#register tr');
-tr.mouseenter(function() {
-  $(this).find('i')
-      .css("visibility", "visible")
-      .css("opacity", this.sectionRowIndex == lockEndRow ? "1" : "0.4");
-});
-tr.mouseleave(function() {
-  $(this).find('i')
-      .css("visibility", this.sectionRowIndex == lockEndRow ? "visible" : "hidden");
-});
-
-$('#register i').click(function() {
-  lockEndRow = this.parentNode.parentNode.sectionRowIndex;
-  restyleTableForLock();
-});
-
-function restyleTableForLock() {
-  $('#register tbody tr').each(function(i, tr) {
-    $(tr).toggleClass("locked", i <= lockEndRow)
-    if (i == lockEndRow) {
-      $(tr).find('i')
-          .css("visibility", "visible")
-          .css("opacity", "1");
-    } else {
-      $(tr).find('i')
-          .css("visibility", "hidden")
+RegisterCache.prototype.get = function(id) {
+  if (!this.registers[id]) {
+    var data = localStorage.getItem(id);
+    var register = ko.observableArray();
+    if (data) {
+      var lastTxn = null;
+      var f = function() { return this[0].balance().add(this[1].amount()); }
+      data.split("\n").forEach(function(line) {
+        var txn = ko.mapping.fromJS(JSON.parse(line), transactionMapping);
+        txn.balance = lastTxn ? ko.computed(f, [lastTxn, txn]) : txn.amount;
+        register.push(txn);
+        lastTxn = txn;
+      });
     }
-  });
+    registers[id] = register;
+  }
+  return registers[id];
 }
 
-restyleTableForLock();
+var registers = new RegisterCache;
+
+/**
+ * Mappings to load/store our in-memory objects to JSON/localStorage, using
+ * Knockout.mapping.
+ */
+var accountMapping = {
+  include: ['id', 'name', 'real'],
+  ignore: ['balance'],
+  //key: function(data) { return ko.utils.unwrapObservable(data.id); },
+};
+
+var entityMapping = {
+  include: ['name', 'accounts'],
+  //'id': {
+  //  create: function(options) {
+  //    var id = options.data;
+  //    // Load the ledger for this entity.
+  //    var ledger = loadLedger(id);
+  //    options.parent.ledger = ledger;
+  //    return ko.mapping.fromJS(id);
+  //  },
+  //},
+  'accounts': {
+    create: function(options) {
+      var ret = ko.mapping.fromJS(options.data, accountMapping);
+      // Load the register for this account.
+      ret.register = registers.get(ret.id());
+      ret.balance = ko.computed(function() {
+        var reg = ret.register() || [];
+        return reg.length > 0 ? reg.last().balance() : new dblbook.Balance();
+      });
+      return ret;
+    },
+  },
+};
+
+var configMapping = {
+  include: ['entities'],
+  'entities': {
+    create: function(options) {
+      var entity =  ko.mapping.fromJS(options.data, entityMapping);
+      // An entity's net worth is the sum of the balances of its real accounts.
+      entity.netWorth = ko.computed(function() {
+        var ret = entity.accounts().reduce(function(sum, acct) {
+          return acct.real ? sum.add(acct.balance()) : sum;
+        }, new dblbook.Balance());
+        return ret;
+      });
+      entity.url = "#entity/" + entity.id()
+      return entity;
+    },
+  },
+};
+
+function loadConfig() {
+  var configData = JSON.parse(localStorage.getItem("config"));
+  return ko.mapping.fromJS(configData, configMapping)
+}
+
+var config = loadConfig();
+var breadcrumbs = ko.observableArray();
+ko.applyBindings({"breadcrumbs": breadcrumbs}, $("#nav").get(0));
+
+var controller = ko.observable();
+
+function route(str) {
+  var match;
+  if (match = str.match(/^#entity\/(\w+)$/)) {
+    var entity = config.entities().filter(function(o) { return o.id() == match[1]; })[0];
+    controller({
+      template: "entity",
+      data: entity,
+    });
+    breadcrumbs([{label: entity.name(), url: entity.url}]);
+  } else {
+    controller({
+      template: "home",
+      data: config
+    });
+    breadcrumbs([]);
+  }
+}
+
+route(document.location.hash);
+ko.applyBindings(controller, $("#content").get(0));
+
+window.addEventListener("hashchange", function() {
+  route(document.location.hash);
+});

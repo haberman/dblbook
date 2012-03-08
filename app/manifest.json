@@ -1,5 +1,5 @@
 {
-  "name": "Double-Booked",
+  "name": "Cat Accounting",
   "description": "Double-entry accounting system",
   "version": "0.1",
   "permissions": [
@@ -13,7 +13,7 @@
   },
   // These are just stand-in icons until I can get real ones.
   "icons": {
-    "16": "icon_16.png",
-    "128": "icon_128.png"
+    "16": "icon_16.jpg",
+    "128": "icon_128.jpg"
   }
 }

@@ -6,15 +6,6 @@
 
 var dblbook = {};
 
-function AssertException(message) { this.message = message; }
-AssertException.prototype.toString = function () {
-  return 'AssertException: ' + this.message;
-}
-
-function assert(exp, message) {
-  if (!exp) throw new AssertException(message);
-}
-
 /**
  * Class for representing decimal numbers losslessly (unlike binary floating
  * point).  Instances are immutable.  Takes inspiration from the "decimal"
@@ -119,8 +110,13 @@ dblbook.Decimal.prototype.toString = function() {
  * balances and their associated commodities (currencies).
  * @constructor
  */
-dblbook.Balance = function() {
+dblbook.Balance = function(str) {
   this.commodities = new Object();
+  if (str) {
+    var arr = str.match(/\$?(-?[0-9]*\.[0-9]+|[0-9]+)/);
+    if (!arr) throw "Yikes.";
+    this.commodities['USD'] = new dblbook.Decimal(arr[0]);
+  }
 };
 
 /**
@@ -128,17 +124,21 @@ dblbook.Balance = function() {
  * @param {Decimal} amount The amount to add.
  * @param {String} commodity The commodity of the amount (eg. "USD").
  */
-dblbook.Balance.prototype.add = function(amount, commodity) {
-  if (!(commodity in this.commodities)) {
-    this.commodities[commodity] = new dblbook.Decimal();
+dblbook.Balance.prototype.add = function(other) {
+  var ret = this.dup();
+  for (var commodity in other.commodities) {
+    if (!(commodity in this.commodities)) {
+      ret.commodities[commodity] = new dblbook.Decimal();
+    }
+    ret.commodities[commodity] = ret.commodities[commodity].add(other.commodities[commodity]);
   }
-  this.commodities[commodity] = this.commodities[commodity].add(amount);
+  return ret;
 };
 
 dblbook.Balance.prototype.dup = function() {
   var ret = new dblbook.Balance();
   for (var commodity in this.commodities) {
-    ret.add(this.commodities[commodity], commodity);
+    ret.commodities[commodity] = this.commodities[commodity];
   }
   return ret;
 };
@@ -153,22 +153,7 @@ dblbook.Balance.prototype.toString = function() {
       strs.push(this.commodities[commodity] + " " + commodity);
     }
   }
-  return strs.join(", ");
+  var ret = strs.join(", ");
+  if (ret == "") ret = "$0";
+  return ret;
 };
-
-/**
- * Given an array of transactions, returns an array that contains both the
- * transaction and the balance.
- */
-dblbook.calculateBalances = function(txns, default_commodity) {
-  var txns_with_balance = new Array();
-  var balance = new dblbook.Balance();
-  var l = txns.length;
-  for (var i = 0; i < l; i++) {
-    var txn = txns[i];
-    balance.add(new dblbook.Decimal(txn.amount),
-                txn.commodity || default_commodity);
-    txns_with_balance.push({"txn": txn, "balance": balance.dup()});
-  }
-  return txns_with_balance;
-}

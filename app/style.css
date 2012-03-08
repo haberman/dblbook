@@ -6,3 +6,47 @@
 }
 
 body { padding-top: 60px; }
+/*
+* {
+     border: 1px solid red !important;
+} */
+
+#nav {
+  position: relative;
+  left: 0;
+  display: block;
+  float: left;
+  margin: 0 10px 0 0;
+}
+
+#nav li:before {
+  content: "\2192\00a0\00a0";
+  margin-right: 7px;
+  color: white;
+  display: run-in;
+}
+
+#nav > li {
+  display: block;
+  float: left;
+}
+#nav > li > a {
+  display: block;
+  float: none;
+  padding: 10px 7px 11px;
+  line-height: 19px;
+  color: #999999;
+  text-decoration: none;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);
+}
+#nav > li > a:hover {
+  background-color: transparent;
+  color: #ffffff;
+  text-decoration: none;
+}
+#nav .active > a, #nav .active > a:hover {
+  color: #ffffff;
+  text-decoration: none;
+  background-color: #222222;
+  background-color: rgba(0, 0, 0, 0.5);
+}
