@@ -6,10 +6,6 @@
 }
 
 body { padding-top: 60px; }
-/*
-* {
-     border: 1px solid red !important;
-} */
 
 #nav {
   position: relative;
@@ -49,4 +45,8 @@ body { padding-top: 60px; }
   text-decoration: none;
   background-color: #222222;
   background-color: rgba(0, 0, 0, 0.5);
+}
+
+.triangleOpen {
+  -webkit-transform: rotate(90deg);
 }
