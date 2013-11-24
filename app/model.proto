@@ -1,0 +1,56 @@
+// This is a logical data model for the application, but isn't actually used
+// anywhere (yet).
+
+message Decimal {
+  required int64 value = 1;
+  required int64 precision = 2;
+}
+
+message Amount {
+  required Decimal quantity = 1;
+  required string commodity = 2;  // ie. "USD", "AAPL", "OzGold", etc
+}
+
+message Entry {
+  required string guid = 1;
+  required int64 time = 2;  // Round to day for less granularity
+  repeated Amount amount = 3;  // Only one per commodity allowed.
+  required string description = 4;
+}
+
+message Account {
+  required string guid = 1;
+
+  // Present if this is not the top-level account of the tree.
+  optional string parent_guid = 2;
+
+  required string name = 3;
+
+  // Count towards net worth?  false for income/expense accounts.
+  enum Type {
+    TYPE_ASSET = 0;
+    TYPE_LIABILITY = 1;
+    TYPE_INCOME = 2;
+    TYPE_EXPENSE = 3;
+  }
+  required Type type = 4;
+
+  // Should be in chronological order.  This list can be partitioned
+  // in the backend data store if necessary.
+  repeated Entry entry = 4;
+}
+
+// Grouping of transactions that must sum to zero.
+// Every transaction must be a member of 0 or 1 transaction groups.
+message Transaction {
+  required string guid = 1;
+
+  // Time and description are necessary only if you want to give some
+  // note on top of the individual times and descriptions of the individual
+  // transactions.
+  optional int64 time = 2;
+  optional string description = 3;
+
+  // The sum of these must be zero.
+  repeated string entry_guid = 4;
+}
