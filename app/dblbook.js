@@ -167,20 +167,19 @@ dblbookApp.config(['$routeProvider',
     $routeProvider.
       when('/entity/:id', {
         templateUrl: 'entity.html',
-        controller: 'EntityCtrl'
       }).
       otherwise({
         templateUrl: 'home.html',
-        controller: 'HomeCtrl'
       });
   }]);
 
-dblbookApp.directive("applink", function ($location) {
-  return {
-    link: function (scope, element, attrs) {
-      element.bind("click", function () {
-        scope.$apply($location.path(attrs.applink))
-      });
+dblbookApp.directive("applink", ['$location',
+  function ($location) {
+    return {
+      link: function (scope, element, attrs) {
+        element.bind("click", function () {
+          scope.$apply($location.path(attrs.applink))
+        });
+      }
     }
-  }
-});
+  }]);

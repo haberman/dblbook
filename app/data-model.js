@@ -159,69 +159,6 @@ dblbook.Balance.prototype.toString = function() {
 };
 
 /**
- * Wrapper around a plain Transaction data object.  In addition to the raw
- * transaction it includes current (in time, as of this transaction) balances
- * for all accounts involved in the transaction.
- *
- * The client never creates or mutates these directly, they are created
- * internally by the Entity object and returned by Entity.transactions().
- */
-dblbook.Transaction = function() {
-}
-
-/**
- * Static function for checking the validity of a raw transaction data object
- * (namely that it balances properly).  It is guaranteed that this will return
- * true for all transactions in an entity.
- */
-dblbook.Transaction.isValid(transactionData) {
-}
-
-/**
- * Returns the raw data object for this transaction.
- */
-dblbook.Transaction.prototype.data() {
-}
-
-/**
- * If this account is part of this transaction, returns the balance of this
- * account as of this transaction.  Otherwise returns undefined.
- */
-dblbook.Transaction.prototype.balance(accountGuid) {
-}
-
-/**
- * Wrapper around a plain Account data object.  In addition to the raw
- * account data it includes links to parent and child accounts, and the current
- * balance of the account.
- *
- * The client never creates or mutates these directly, they are created
- * internally by the Entity object and returned by Entity.accounts().
- */
-dblbook.Account = function() {
-}
-
-/**
- * Returns the raw data object for this account.
- */
-dblbook.Account.prototype.data() {
-}
-
-/**
- * Returns the parent account for this account, or null if this is a top-level
- * account.
- */
-dblbook.Account.prototype.parent() {
-}
-
-/**
- * Returns an array of children accounts, which will be empty if this account
- * has no children.
- */
-dblbook.Account.prototype.children() {
-}
-
-/**
  * Class for representing a set of accounts and transactions for some entity
  * (like a person or a business).
  *
@@ -316,6 +253,13 @@ dblbook.Entity.prototype.accounts = function() {
  * Returns a list of transactions, in chronological order.
  * We will likely want to support lazy loading, in which case this return all
  * *loaded* transactions.
+ *
+ * The returned transactions are plain JavaScript objects with the following
+ * members:
+ *
+ * - data: the raw data for this Transaction (as in model.proto)
+ * - balances: an object mapping account guid to balance, only for accounts
+ *   that have entries in this transaction.
  *
  * @return {Array} An array of transaction objects.
  */

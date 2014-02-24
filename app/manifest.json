@@ -13,7 +13,7 @@
   },
   // These are just stand-in icons until I can get real ones.
   "icons": {
-    "16": "icon_16.jpg",
-    "128": "icon_128.jpg"
+    "16": "img/icon_16.jpg",
+    "128": "img/icon_128.jpg"
   }
 }

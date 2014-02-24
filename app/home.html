@@ -1,16 +1,18 @@
-<img src="img/kitten700x400.jpg"
-     style="padding:50px; margin-left: auto; margin-right: auto; display:block;" width=700 height=400/>
-<table id="entities" class="table" style="width: 50%; margin-left: auto; margin-right: auto;">
-  <thead>
-    <tr>
-      <th style="text-align: right">Entity</th>
-      <th>Net Worth</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr ng-repeat="entity in entities">
-      <td style="text-align: right"><a applink="entity/{{entity.id}}">{{entity.name}}</a></td>
-      <td>{{entity.netWorth}}</td>
-    </tr>
-  </tbody>
-</table>
+<div ng-controller="HomeCtrl">
+  <img src="img/kitten700x400.jpg"
+       style="padding:50px; margin-left: auto; margin-right: auto; display:block;" width=700 height=400/>
+  <table id="entities" class="table" style="width: 50%; margin-left: auto; margin-right: auto;">
+    <thead>
+      <tr>
+        <th style="text-align: right">Entity</th>
+        <th>Net Worth</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr ng-repeat="entity in entities">
+        <td style="text-align: right"><a applink="entity/{{entity.id}}">{{entity.name}}</a></td>
+        <td>{{entity.netWorth}}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
