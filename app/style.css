@@ -1,6 +1,10 @@
 /* Visual design is not my forte, so ths is not particularly beautiful right
  * now */
 
+a:hover {
+  cursor: pointer;
+}
+
 .amount, .balance {
   text-align: right !important;
 }

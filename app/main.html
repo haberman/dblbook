@@ -5,147 +5,8 @@
     <title>Feline Funds</title>
     <link rel="stylesheet" href="lib/bootstrap.min.css">
     <link rel="stylesheet" href="lib/bootstrap-responsive.min.css">
-    <!--link rel="stylesheet" href="lib/font-awesome.css"-->
+    <link rel="stylesheet" href="bower_components//angular/angular-csp.css">
     <link rel="stylesheet" href="style.css">
-  </head>
-  <body style="display: none">
-    <div class="navbar navbar-fixed-top">
-      <div class="navbar-inner">
-        <div class="container">
-          <a class="brand" href="#">Feline Funds</a>
-          <ul id="nav" data-bind="foreach: breadcrumbs">
-            <li><a data-bind="text: label, attr: { href: url }"></a></li>
-          </ul>
-        </div>
-      </div>
-    </div>
-
-    <div class="container" id="content">
-      <div class="content" data-bind="with: data">
-
-      <!-- ko if: $root.page == "home" -->
-        <img src="http://placekitten.com/g/700/400"
-             style="padding:50px; margin-left: auto; margin-right: auto; display:block;" width=700 height=400/>
-        <table id="entities" class="table" style="width: 50%; margin-left: auto; margin-right: auto;">
-          <thead>
-            <tr>
-              <th style="text-align: right">Entity</th>
-              <th>Net Worth</th>
-            </tr>
-          </thead>
-          <tbody data-bind="foreach: entities">
-            <tr>
-              <td style="text-align: right"><a data-bind="text: name, attr: { href: url }"></a></td>
-              <td data-bind="text: netWorth"></td>
-            </tr>
-          </tbody>
-        </table>
-      <!-- /ko -->
-
-      <!-- ko if: $root.page == "entity" -->
-        <div style="padding: 30px;">
-          <div style="float: right; width: 500px; height: 200px; border: 1px solid #79c634;">
-          </div>
-          <h1 data-bind="text: name" style="margin-bottom: 3px;"></h1>
-          <p style="color: #79c634; font-size: 25px;" data-bind="text: netWorth"></p>
-          <div style="clear: both; height: 50px;"></div>
-          <ul class="nav nav-tabs">
-            <li class="active"><a href="#">Accounts</a></li>
-            <li><a href="#">Ledger</a></li>
-            <li><a href="#">Graphs</a></li>
-          </ul>
-
-          <div style="margin-left: auto; margin-right: auto; width: 70%">
-
-            <!-- ko if: $root.subpage == "accounts" -->
-              <!-- ko if: !$root.editing() -->
-                <h2>Assets and Liabilities</h2>
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>Account</th>
-                      <th>Change</th>
-                      <th>New Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody data-bind="foreach: accounts">
-                    <tr>
-                      <td>
-                        <!-- ko if: group -->
-                        <i class="icon-play" data-bind="css: { triangleOpen: open }, click: function() { open(!open()); }"></i>
-                        <!-- /ko -->
-                      </td>
-                      <td><a href="#" data-bind="text: name"></a></td>
-                      <td></td>
-                      <td data-bind="text: balance"></td>
-                    </tr>
-                  </tbody>
-                </table>
-              <h2>Income and Expenses</h2>
-                <a data-bind="click: function() { $root.editing(true); installPopovers(); }"
-                    class="btn" style="float:right">Edit</a>
-              <!-- /ko -->
-
-              <!-- ko if: $root.editing -->
-                <h2>Assets and Liabilities</h2>
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th></th>
-                      <th>Account</th>
-                    </tr>
-                  </thead>
-                  <tbody data-bind="foreach: accounts">
-                    <tr>
-                      <td>
-                        <!-- ko if: group -->
-                        <i class="icon-play" data-bind="css: { triangleOpen: open }, click: function() { open(!open()); }"></i>
-                        <!-- /ko -->
-                      </td>
-                      <td>
-                        <!-- ko if: editing -->
-                          <input data-bind="value: name, hasfocus: editing, event: { keyup: onKeyUp }"></input>
-                        <!-- /ko -->
-
-                        <!-- ko if: !editing() -->
-                          <span data-bind="text: name, click: function() { editing(true); }"></span>
-                          <!-- ko if: register().length == 0 -->
-                            <a href="#" data-bind="click: function() { $parent.accounts.remove($data); }">
-                              <i class="icon-trash"></i>
-                            </a>
-                          <!-- /ko -->
-
-                        <!-- /ko -->
-
-                        <!-- ko if: register().length > 0 -->
-                          <a href="#" rel="popover" data-content="To delete an account you must first delete all its transactions." title="Can't delete">
-                            <i class="icon-trash" style="opacity: 0.4;"></i>
-                          </a>
-                        <!-- /ko -->
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p>
-                <a data-bind="click: function() { accounts.push(new Account); accounts().last().editing(true); }"
-                    class="btn">New Account</a>&nbsp;
-                <a data-bind=""
-                    class="btn">New Account Group</a>
-                </p>
-                <h2 style="clear:both">Income and Expenses</h2>
-                <a data-bind="click: function() { $root.editing(false) }"
-                    class="btn btn-primary" style="float:right">Done</a>
-              <!-- /ko -->
-
-            <!-- /ko -->
-
-          </div>
-        </div>
-      <!-- /ko -->
-
-      </div>
-    </div>
 
     <script type="text/html" id="register">
       <table data-bind="foreach: register">
@@ -158,28 +19,29 @@
       </table>
     </script>
 
-    <script type="text/javascript">
-      function loadScript(src) {
-        document.write("\x3Cscript src='" + src + "'>\x3C/script>");
-      }
-      var debug = false;
-      if (debug) {
-        loadScript("lib/knockout.js");
-        loadScript("lib/knockout.mapping.js");
-      } else {
-        loadScript("lib/knockout.debug.js");
-        loadScript("lib/knockout.mapping.debug.js");
-      }
-    </script>
-    <script src="lib/knockout.mapping.debug.js"></script>
-    <script src="lib/d3.min.js"></script>
-    <script src="lib/jquery.js"></script>
+    <script src="bower_components/angular/angular.min.js"></script>
+    <script src="bower_components/angular-route/angular-route.min.js"></script>
+    <script src="bower_components/angular-bootstrap/ui-bootstrap.min.js"></script>
     <!--script src="secret.js"></script-->
-    <script src="lib/bootstrap.min.js"></script>
-    <script src="lib/bootstrap-tooltip.js"></script>
-    <script src="lib/bootstrap-popover.js"></script>
     <script src="data-model.js"></script>
     <script src="scrape.js"></script>
     <script src="dblbook.js"></script>
+  </head>
+  <body ng-app="dblbookApp" ng-csp>
+    <div class="navbar navbar-fixed-top">
+      <div class="navbar-inner">
+        <div class="container">
+          <a class="brand" applink="/">Feline Funds</a>
+          <ul id="nav" data-bind="foreach: breadcrumbs">
+            <li><a data-bind="text: label, attr: { href: url }"></a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="container" id="content">
+      <div class="content" ng-view>
+      </div>
+    </div>
   </body>
 </html>

@@ -1,23 +1,6 @@
 // This is a logical data model for the application, but isn't actually used
 // anywhere (yet).
 
-message Decimal {
-  required int64 value = 1;
-  required int64 precision = 2;
-}
-
-message Amount {
-  required Decimal quantity = 1;
-  required string commodity = 2;  // ie. "USD", "AAPL", "OzGold", etc
-}
-
-message Entry {
-  required string guid = 1;
-  required int64 time = 2;  // Round to day for less granularity
-  repeated Amount amount = 3;  // Only one per commodity allowed.
-  required string description = 4;
-}
-
 message Account {
   required string guid = 1;
 
@@ -34,15 +17,31 @@ message Account {
     TYPE_EXPENSE = 3;
   }
   required Type type = 4;
+}
 
-  // Should be in chronological order.  This list can be partitioned
-  // in the backend data store if necessary.
-  repeated Entry entry = 4;
+message Decimal {
+  required int64 value = 1;
+  required int64 precision = 2;
+}
+
+message Amount {
+  required Decimal quantity = 1;
+  required string commodity = 2;  // ie. "USD", "AAPL", "OzGold", etc
+}
+
+message Entry {
+  required string account_guid = 1;
+  required int64 time = 2;  // Round to day for less granularity
+  repeated Amount amount = 3;  // Only one per commodity allowed.
+  required string description = 4;
 }
 
 // Grouping of transactions that must sum to zero.
 // Every transaction must be a member of 0 or 1 transaction groups.
 message Transaction {
+  // This guid remains stable even if the transaction is modified.
+  // We could consider also having a guid which only pertains to this
+  // *version* of the transaction.
   required string guid = 1;
 
   // Time and description are necessary only if you want to give some
@@ -52,5 +51,5 @@ message Transaction {
   optional string description = 3;
 
   // The sum of these must be zero.
-  repeated string entry_guid = 4;
+  repeated Entry entry = 4;
 }

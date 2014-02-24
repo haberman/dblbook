@@ -2,13 +2,13 @@
   "name": "Feline Funds",
   "description": "Double-entry accounting system",
   "version": "0.1",
+  "manifest_version": 2,
   "permissions": [
-    "tabs",
     "https://secure.ingdirect.com/"
   ],
   "app": {
-    "launch": {
-      "local_path": "main.html"
+    "background": {
+      "scripts": ["background.js"]
     }
   },
   // These are just stand-in icons until I can get real ones.

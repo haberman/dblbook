@@ -15,6 +15,7 @@ function guid() {
 
 function addAmounts() { return this[0].balance().add(this[1].amount()); }
 
+/*
 function Transaction(data, lastTxn) {
   ko.mapping.fromJS(JSON.parse(data), {
     include: ['id', 'date', 'amount', 'description'],
@@ -30,7 +31,7 @@ function Transaction(data, lastTxn) {
     },
   }, this);
   this.balance = lastTxn ? ko.computed(addAmounts, [lastTxn, this]) : this.amount;
-}
+}*/
 
 /**
  * The same register can be shared between multiple accounts, so we have a
@@ -38,6 +39,7 @@ function Transaction(data, lastTxn) {
  *
  * @constructor
  */
+/*
 function RegisterCache() {
   this.registers = {};
 }
@@ -117,41 +119,68 @@ function Config(data) {
 }
 
 var config = new Config(JSON.parse(localStorage.getItem("config")));
-var breadcrumbs = ko.observableArray();
-ko.applyBindings({"breadcrumbs": breadcrumbs}, $("#nav").get(0));
+//var breadcrumbs = ko.observableArray();
+//ko.applyBindings({"breadcrumbs": breadcrumbs}, $("#nav").get(0));
 
 var content = ko.observable();
+*/
 
-function installPopovers() {
-  $("a[rel=popover]")
-    .popover()
-    .click(function(event) { event.preventDefault(); });
-}
+var dblbookControllers = angular.module('dblbookControllers', []);
 
-function route(str) {
-  var match;
-  if (match = str.match(/^#entity\/(\w+)$/)) {
-    var entity = config.entities().filter(function(o) { return o.id() == match[1]; })[0];
-    content({
-      page: "entity",
-      subpage: "accounts",
-      data: entity,
-      editing: ko.observable(false)
-    });
-    breadcrumbs([{label: entity.name(), url: entity.url}]);
-  } else {
-    content({
-      page: "home",
-      data: config
-    });
-    breadcrumbs([]);
+dblbookControllers.controller('HomeCtrl', ['$scope',
+  function ($scope) {
+    $scope.entities = [
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$105"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$0"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$111"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$34"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"},
+      {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"}
+    ];
+  }]);
+
+dblbookControllers.controller('EntityCtrl', ['$scope', '$routeParams',
+  function($scope, $routeParams) {
+    $scope.entityId = $routeParams.id;
+    $scope.editing = false;
+    $scope.subpage = "accounts";
+
+    $scope.edit = function() {
+      $scope.editing = true;
+    }
+
+    $scope.finishEdit = function() {
+      $scope.editing = false;
+    }
+  }]);
+
+var dblbookApp = angular.module('dblbookApp', [
+  'ngRoute',
+  'dblbookControllers',
+  'ui.bootstrap'
+]);
+
+dblbookApp.config(['$routeProvider',
+  function($routeProvider) {
+    $routeProvider.
+      when('/entity/:id', {
+        templateUrl: 'entity.html',
+        controller: 'EntityCtrl'
+      }).
+      otherwise({
+        templateUrl: 'home.html',
+        controller: 'HomeCtrl'
+      });
+  }]);
+
+dblbookApp.directive("applink", function ($location) {
+  return {
+    link: function (scope, element, attrs) {
+      element.bind("click", function () {
+        scope.$apply($location.path(attrs.applink))
+      });
+    }
   }
-}
-
-route(document.location.hash);
-ko.applyBindings(content, $("#content").get(0));
-$('body').show();
-
-window.addEventListener("hashchange", function() {
-  route(document.location.hash);
 });

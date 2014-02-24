@@ -65,7 +65,7 @@ dblbook.Decimal.prototype.toPrecision = function(precision) {
 };
 
 /**
- * Returns a new object is this added to "other".
+ * Returns a new object whose value is this added to "other".
  * @param {Decimal} other The number to add to this one.
  * @return {Decimal} The sum.
  */
@@ -157,3 +157,167 @@ dblbook.Balance.prototype.toString = function() {
   if (ret == "") ret = "$0";
   return ret;
 };
+
+/**
+ * Wrapper around a plain Transaction data object.  In addition to the raw
+ * transaction it includes current (in time, as of this transaction) balances
+ * for all accounts involved in the transaction.
+ *
+ * The client never creates or mutates these directly, they are created
+ * internally by the Entity object and returned by Entity.transactions().
+ */
+dblbook.Transaction = function() {
+}
+
+/**
+ * Static function for checking the validity of a raw transaction data object
+ * (namely that it balances properly).  It is guaranteed that this will return
+ * true for all transactions in an entity.
+ */
+dblbook.Transaction.isValid(transactionData) {
+}
+
+/**
+ * Returns the raw data object for this transaction.
+ */
+dblbook.Transaction.prototype.data() {
+}
+
+/**
+ * If this account is part of this transaction, returns the balance of this
+ * account as of this transaction.  Otherwise returns undefined.
+ */
+dblbook.Transaction.prototype.balance(accountGuid) {
+}
+
+/**
+ * Wrapper around a plain Account data object.  In addition to the raw
+ * account data it includes links to parent and child accounts, and the current
+ * balance of the account.
+ *
+ * The client never creates or mutates these directly, they are created
+ * internally by the Entity object and returned by Entity.accounts().
+ */
+dblbook.Account = function() {
+}
+
+/**
+ * Returns the raw data object for this account.
+ */
+dblbook.Account.prototype.data() {
+}
+
+/**
+ * Returns the parent account for this account, or null if this is a top-level
+ * account.
+ */
+dblbook.Account.prototype.parent() {
+}
+
+/**
+ * Returns an array of children accounts, which will be empty if this account
+ * has no children.
+ */
+dblbook.Account.prototype.children() {
+}
+
+/**
+ * Class for representing a set of accounts and transactions for some entity
+ * (like a person or a business).
+ *
+ * This object abstracts away the specific storage backend.  We provide a
+ * transactional update API, but it is up to the specific implementation when
+ * or if this is committed to a transactional data store or whether it is
+ * replicated anywhere.
+ *
+ * If we get fancy later on this might grow some functionality for performing
+ * merges if there were concurrent mutations.
+ *
+ * TODO: The name "Entity" isn't super clear.  Nothing better comes to mind at
+ * the moment.
+ * @constructor
+ */
+dblbook.Entity = function(backend) {
+  this.backend = backend;
+}
+
+/**
+ * Adds an account.  Account name and type should be set, but guid should be
+ * unset (the object will assign one appropriately).  The parent_guid must be
+ * set; for a top-level account the special value GUID_TOP should be used.
+ *
+ * @param {Account} account The account to add.
+ */
+dblbook.Entity.prototype.createAccount = function(account) {
+}
+
+/**
+ * Updates an existing account.  Account guid must be set, and any other
+ * fields which are set will overwrite previously set fields.
+ *
+ * @param {Account} account The account to update.
+ */
+dblbook.Entity.prototype.updateAccount = function(account) {
+}
+
+/**
+ * Deletes an existing account.  This is not allowed if there are any entries
+ * for this account in any transactions.
+ *
+ * @param {string} accountGuid The guid of the account to delete.
+ */
+dblbook.Entity.prototype.deleteAccount = function(accountGuid) {
+}
+
+/**
+ * Adds a transaction.  The transaction must be valid.  The guid should not
+ * be set.
+ *
+ * @param {Transaction} transaction The transaction to add.
+ */
+dblbook.Entity.prototype.createTransaction = function(transaction) {
+}
+
+/**
+ * Updates an existing transaction.  Transaction guid must be set, and the
+ * transaction must be valid.  This will completely overwrite the previous
+ * value of this transaction.
+ *
+ * @param {Transaction} transaction The new value for this transaction.
+ */
+dblbook.Entity.prototype.updateTransaction = function(transaction) {
+}
+
+/**
+ * Deletes an existing transaction.
+ *
+ * @param {string} transactionGuid The guid of the transaction to delete.
+ */
+dblbook.Entity.prototype.deleteAccount = function(transactionGuid) {
+}
+
+/**
+ * Returns a list of top-level accounts.
+ *
+ * The returned accounts are plain JavaScript objects with the following
+ * members:
+ *
+ * - data: the raw data for this Account (as in model.proto)
+ * - balance: the account's balance as of the newest transaction
+ * - parent: the parent account, or null if this is at the top level.
+ * - children: an array of children, which may be empty.
+ *
+ * @return {Array} An array of account objects.
+ */
+dblbook.Entity.prototype.accounts = function() {
+}
+
+/**
+ * Returns a list of transactions, in chronological order.
+ * We will likely want to support lazy loading, in which case this return all
+ * *loaded* transactions.
+ *
+ * @return {Array} An array of transaction objects.
+ */
+dblbook.Entity.prototype.transactions = function() {
+}

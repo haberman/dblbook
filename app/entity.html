@@ -1,0 +1,96 @@
+<div style="padding: 30px;">
+  <div style="float: right; width: 500px; height: 200px; border: 1px solid #79c634;">
+  </div>
+  <h1 data-bind="text: name" style="margin-bottom: 3px;"></h1>
+  <p style="color: #79c634; font-size: 25px;" data-bind="text: netWorth"></p>
+  <div style="clear: both; height: 50px;"></div>
+  <ul class="nav nav-tabs">
+    <li ng-class="{active: subpage == 'accounts'}"><a ng-click="subpage = 'accounts'">Accounts</a></li>
+    <li ng-class="{active: subpage == 'ledger'}"><a ng-click="subpage = 'ledger'">Ledger</a></li>
+    <li ng-class="{active: subpage == 'graphs'}"><a ng-click="subpage = 'graphs'">Graphs</a></li>
+  </ul>
+
+  <div style="margin-left: auto; margin-right: auto; width: 70%" ng-switch on="subpage">
+
+    <div ng-switch-when="accounts" ng-switch on="editing">
+      <div ng-switch-default>
+        <h2>Assets and Liabilities</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Account</th>
+              <th>Change</th>
+              <th>New Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr ng-repeat="account in accounts">
+              <td>
+                <!-- ko if: group -->
+                <i class="icon-play" data-bind="css: { triangleOpen: open }, click: function() { open(!open()); }"></i>
+                <!-- /ko -->
+              </td>
+              <td><a href="#" data-bind="text: name"></a></td>
+              <td></td>
+              <td data-bind="text: balance"></td>
+            </tr>
+          </tbody>
+        </table>
+        <h2>Income and Expenses</h2>
+          <a ng-click="edit()" class="btn" style="float:right">Edit</a>
+      </div>
+
+      <div ng-switch-when="true">
+        <h2>Assets and Liabilities</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Account</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr ng-repeat="account in accounts">
+              <td>
+                <!-- ko if: group -->
+                <i class="icon-play" data-bind="css: { triangleOpen: open }, click: function() { open(!open()); }"></i>
+                <!-- /ko -->
+              </td>
+              <td>
+                <!-- ko if: editing -->
+                  <input data-bind="value: name, hasfocus: editing, event: { keyup: onKeyUp }"></input>
+                <!-- /ko -->
+
+                <!-- ko if: !editing() -->
+                  <span data-bind="text: name, click: function() { editing(true); }"></span>
+                  <!-- ko if: register().length == 0 -->
+                    <a href="#" data-bind="click: function() { $parent.accounts.remove($data); }">
+                      <i class="icon-trash"></i>
+                    </a>
+                  <!-- /ko -->
+
+                <!-- /ko -->
+
+                <!-- ko if: register().length > 0 -->
+                  <button title="Can't delete">
+                  <!--  Popovers in angular.ui appear broken right now: button popover-trigger="mouseenter" popover="To delete an account you must first delete all its transactions." title="Can't delete"-->
+                    <i class="icon-trash" style="opacity: 0.4;"></i>
+                  </button>
+                <!-- /ko -->
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+        <a data-bind="click: function() { accounts.push(new Account); accounts().last().editing(true); }"
+            class="btn">New Account</a>&nbsp;
+        <a data-bind=""
+            class="btn">New Account Group</a>
+        </p>
+        <h2 style="clear:both">Income and Expenses</h2>
+        <a ng-click="finishEdit()" class="btn btn-primary" style="float:right">Done</a>
+      </div>
+    </div>
+  </div>
+</div>
