@@ -1,8 +1,8 @@
 <div ng-controller="EntityCtrl" style="padding: 30px;">
   <div style="float: right; width: 500px; height: 200px; border: 1px solid #79c634;">
   </div>
-  <h1 data-bind="text: name" style="margin-bottom: 3px;"></h1>
-  <p style="color: #79c634; font-size: 25px;" data-bind="text: netWorth"></p>
+  <h1 style="margin-bottom: 3px;">{{name}}</h1>
+  <p style="color: #79c634; font-size: 25px;">{{transactions.last().netWorth()}}</p>
   <div style="clear: both; height: 50px;"></div>
   <ul class="nav nav-tabs">
     <li ng-class="{active: subpage == 'accounts'}"><a ng-click="subpage = 'accounts'">Accounts</a></li>
@@ -27,13 +27,12 @@
           <tbody>
             <tr ng-repeat="account in accounts">
               <td>
-                <!-- ko if: group -->
-                <i class="icon-play" data-bind="css: { triangleOpen: open }, click: function() { open(!open()); }"></i>
-                <!-- /ko -->
+                <i ng-show="account.children.length() > 0" class="icon-play" ng-click="toggle()"
+                   ng-style="{ triangleOpen: open }"></i>
               </td>
-              <td><a href="#" data-bind="text: name"></a></td>
+              <td><a href="#">{{account.name}}</a></td>
               <td></td>
-              <td data-bind="text: balance"></td>
+              <td>{{account.balance}}</td>
             </tr>
           </tbody>
         </table>
@@ -53,41 +52,34 @@
           <tbody>
             <tr ng-repeat="account in accounts">
               <td>
-                <!-- ko if: group -->
-                <i class="icon-play" data-bind="css: { triangleOpen: open }, click: function() { open(!open()); }"></i>
-                <!-- /ko -->
+                <i ng-show="account.children.length() > 0" class="icon-play" ng-click="toggle()"
+                   ng-style="{ triangleOpen: open }"></i>
               </td>
               <td>
-                <!-- ko if: editing -->
-                  <input data-bind="value: name, hasfocus: editing, event: { keyup: onKeyUp }"></input>
-                <!-- /ko -->
+                <span ng-switch on="editing">
+                  <input ng-switch-when="true" data-bind="value: name, hasfocus: editing, event: { keyup: onKeyUp }"></input>
+                  <span ng-switch-default data-bind="text: name, click: function() { editing(true); }"></span>
+                </span>
 
-                <!-- ko if: !editing() -->
-                  <span data-bind="text: name, click: function() { editing(true); }"></span>
-                  <!-- ko if: register().length == 0 -->
-                    <a href="#" data-bind="click: function() { $parent.accounts.remove($data); }">
-                      <i class="icon-trash"></i>
-                    </a>
-                  <!-- /ko -->
+                <span ng-switch on="account.empty">
+                  <a ng-switch-when="true" href="#" ng-click="deleteAccount()">
+                    <i class="icon-trash"></i>
+                  </a>
 
-                <!-- /ko -->
-
-                <!-- ko if: register().length > 0 -->
-                  <button title="Can't delete">
-                  <!--  Popovers in angular.ui appear broken right now: button popover-trigger="mouseenter" popover="To delete an account you must first delete all its transactions." title="Can't delete"-->
+                  <button ng-switch-default title="Can't delete">
+                  <!--  Popovers in angular.ui appear broken right now:
+                    button popover-trigger="mouseenter"
+                    popover="To delete an account you must first delete all its transactions."
+                    title="Can't delete"-->
                     <i class="icon-trash" style="opacity: 0.4;"></i>
                   </button>
-                <!-- /ko -->
+                </span>
               </td>
             </tr>
           </tbody>
         </table>
-        <p>
-        <a data-bind="click: function() { accounts.push(new Account); accounts().last().editing(true); }"
-            class="btn">New Account</a>&nbsp;
-        <a data-bind=""
-            class="btn">New Account Group</a>
-        </p>
+
+        <p><a ng-click="newAccount()" class="btn">New Account</a></p>
         <h2 style="clear:both">Income and Expenses</h2>
         <a ng-click="finishEdit()" class="btn btn-primary" style="float:right">Done</a>
       </div>

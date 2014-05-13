@@ -32,8 +32,8 @@
       <div class="navbar-inner">
         <div class="container">
           <a class="brand" applink="/">Feline Funds</a>
-          <ul id="nav" data-bind="foreach: breadcrumbs">
-            <li><a data-bind="text: label, attr: { href: url }"></a></li>
+          <ul id="nav">
+            <li ng-repeat="n in breadcrumbs"><a>{{n.text}}</a></li>
           </ul>
         </div>
       </div>

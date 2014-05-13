@@ -49,6 +49,9 @@ dblbook.Decimal = function(value, precision) {
   } else if (typeof(value) == "number") {
     this.value = value;
     this.precision = precision;
+  } else {
+    this.value = value.value;
+    this.precision = value.precision;
   }
 };
 
@@ -110,19 +113,24 @@ dblbook.Decimal.prototype.toString = function() {
  * balances and their associated commodities (currencies).
  * @constructor
  */
-dblbook.Balance = function(str) {
-  this.commodities = new Object();
-  if (str) {
+dblbook.Balance = function(amounts) {
+  this.commodities = {};
+  for (var i in amounts) {
+    var amount = amounts[i];
+    this.commodities[amount.commodity] = new dblbook.Decimal(amount.quantity);
+  }
+  /* For string construction
+  if (data) {
     var arr = str.match(/\$?(-?[0-9]*\.[0-9]+|[0-9]+)/);
     if (!arr) throw "Yikes.";
     this.commodities['USD'] = new dblbook.Decimal(arr[0]);
   }
+  */
 };
 
 /**
  * Adds the given amount in the given commodity to this balance.
- * @param {Decimal} amount The amount to add.
- * @param {String} commodity The commodity of the amount (eg. "USD").
+ * @param {Balance} amount The balance to add.
  */
 dblbook.Balance.prototype.add = function(other) {
   var ret = this.dup();
@@ -130,8 +138,18 @@ dblbook.Balance.prototype.add = function(other) {
     if (!(commodity in this.commodities)) {
       ret.commodities[commodity] = new dblbook.Decimal();
     }
-    ret.commodities[commodity] = ret.commodities[commodity].add(other.commodities[commodity]);
+    var sum = ret.commodities[commodity].add(other.commodities[commodity]);
+    console.log(sum.toString())
+    if (sum.toString() == "0") {
+      delete ret.commodities[commodity];
+    } else {
+      ret.commodities[commodity] = sum;
+    }
   }
+  console.log("A + B = C")
+  console.log(this)
+  console.log(other)
+  console.log(ret)
   return ret;
 };
 
@@ -146,6 +164,7 @@ dblbook.Balance.prototype.dup = function() {
 dblbook.Balance.prototype.toString = function() {
   var strs = new Array();
   for (var commodity in this.commodities) {
+    //console.log(commodity);
     // Special-case commodities with common symbols.
     if (commodity == "USD") {
       strs.push("$" + this.commodities[commodity]);
@@ -154,9 +173,74 @@ dblbook.Balance.prototype.toString = function() {
     }
   }
   var ret = strs.join(", ");
-  if (ret == "") ret = "$0";
   return ret;
-};
+}
+
+dblbook.isArray = function(val) {
+  // cf. http://stackoverflow.com/questions/4775722/check-if-object-is-array
+  return Object.prototype.toString.call(val) === '[object Array]';
+}
+
+/**
+ * Returns true if the given account is valid in isolation.
+ * Does not validate things external to this account, like that the parent
+ * account must exist.
+ */
+dblbook.accountIsValid = function(account) {
+}
+
+/**
+ * If the transaction is unbalanced, returns the unbalanced balance.
+ * Otherwise, (if the transaction is balanced), returns null.
+ */
+dblbook.unbalancedTransactionAmount = function(txn) {
+  var unbalanced = new dblbook.Balance();
+
+  for (var i in txn.entry) {
+    var entry = txn.entry[i]
+    if (typeof entry.account_guid != "string" ||
+        !dblbook.isArray(entry.amount) ||
+        entry.amount.length < 1) {
+      return false;
+    }
+    unbalanced = unbalanced.add(new dblbook.Balance(entry.amount));
+  }
+
+  if (unbalanced.toString() == "") {
+    return null;
+  } else {
+    return unbalanced;
+  }
+}
+
+/**
+ * Returns true if the given transaction is valid in isolation.
+ * Does not validate things external to this transaction, like that all of the
+ * accounts must exist.
+ */
+dblbook.transactionIsValid = function(txn) {
+  if (typeof txn.timestamp != "number" ||
+      typeof txn.description != "string" || 
+      !dblbook.isArray(txn.entry) ||
+      txn.entry.length < 2) {
+    return false;
+  }
+
+  for (var i in txn.entry) {
+    var entry = txn.entry[i]
+    if (typeof entry.account_guid != "string" ||
+        !dblbook.isArray(entry.amount) ||
+        entry.amount.length < 1) {
+      return false;
+    }
+  }
+
+  if (dblbook.unbalancedTransactionAmount(txn)) {
+    return false;
+  }
+
+  return true;
+}
 
 /**
  * Class for representing a set of accounts and transactions for some entity
@@ -174,36 +258,91 @@ dblbook.Balance.prototype.toString = function() {
  * the moment.
  * @constructor
  */
-dblbook.Entity = function(backend) {
-  this.backend = backend;
+dblbook.openDB = function(callback) {
+  var self = this;
+  var version = 1;
+  var request = indexedDB.open("dblbook", version);
+
+  request.onupgradeneeded = function(e) {
+    var db = request.result;
+    var store = db.createObjectStore("transactions", {keyPath: "guid"});
+    var date_order = store.createIndex("time_order", "timestamp")
+
+    store = db.createObjectStore("accounts", {keyPath: "guid"});
+  }
+
+  request.onsuccess = function() {
+    if (dblbook.DB.created) {
+      callback(null, "Only one DB object allowed");
+    } else {
+      dblbook.DB.created = true;
+
+      var db = new dblbook.DB();
+      db.db = request.result;
+      db._load();
+      callback(db);
+    }
+  }
+
+  request.onerror = function() {
+    callback(null, "error opening IndexedDB");
+  }
+}
+
+dblbook.DB = function() {
+}
+
+dblbook.DB.prototype._load = function() {
+  this._transactions = [];
+  this._accounts = [];
+  /*
+
+  var txn = this.db.transaction("transactions", "readonly");
+  var store = tx.objectStore("transactions");
+  var index = store.index("date_order");
+
+  var request = index.openCursor().onsuccess = function() {
+    var cursor = request.result;
+    if (cursor) {
+
+    }
+  }
+  */
 }
 
 /**
- * Adds an account.  Account name and type should be set, but guid should be
+ * Adds an account.  Constraints:
+ *
+ * 1. account guid must not be set (one will be assigned).
+ * 2. account must be valid.Account name and type should be set, but guid should be
  * unset (the object will assign one appropriately).  The parent_guid must be
  * set; for a top-level account the special value GUID_TOP should be used.
  *
  * @param {Account} account The account to add.
  */
-dblbook.Entity.prototype.createAccount = function(account) {
+dblbook.DB.prototype.createAccount = function(account) {
 }
 
 /**
- * Updates an existing account.  Account guid must be set, and any other
- * fields which are set will overwrite previously set fields.
+ * Updates an existing account.  Constraints:
+ *
+ * 1. account for this guid must exist (and guid must be set).
+ * 2. account must be valid.
  *
  * @param {Account} account The account to update.
  */
-dblbook.Entity.prototype.updateAccount = function(account) {
+dblbook.DB.prototype.updateAccount = function(account) {
 }
 
 /**
- * Deletes an existing account.  This is not allowed if there are any entries
- * for this account in any transactions.
+ * Deletes an existing account.  Constraints:
+ *
+ * 1. the account must exist.
+ * 2. the account must not have any transactions that reference it.
  *
  * @param {string} accountGuid The guid of the account to delete.
  */
-dblbook.Entity.prototype.deleteAccount = function(accountGuid) {
+dblbook.DB.prototype.deleteAccount = function(accountGuid) {
 }
 
 /**
@@ -212,7 +351,7 @@ dblbook.Entity.prototype.deleteAccount = function(accountGuid) {
  *
  * @param {Transaction} transaction The transaction to add.
  */
-dblbook.Entity.prototype.createTransaction = function(transaction) {
+dblbook.DB.prototype.createTransaction = function(transaction) {
 }
 
 /**
@@ -222,7 +361,7 @@ dblbook.Entity.prototype.createTransaction = function(transaction) {
  *
  * @param {Transaction} transaction The new value for this transaction.
  */
-dblbook.Entity.prototype.updateTransaction = function(transaction) {
+dblbook.DB.prototype.updateTransaction = function(transaction) {
 }
 
 /**
@@ -230,7 +369,7 @@ dblbook.Entity.prototype.updateTransaction = function(transaction) {
  *
  * @param {string} transactionGuid The guid of the transaction to delete.
  */
-dblbook.Entity.prototype.deleteAccount = function(transactionGuid) {
+dblbook.DB.prototype.deleteTransaction = function(transactionGuid) {
 }
 
 /**
@@ -239,6 +378,7 @@ dblbook.Entity.prototype.deleteAccount = function(transactionGuid) {
  * The returned accounts are plain JavaScript objects with the following
  * members:
  *
+ * - db: link back to the database
  * - data: the raw data for this Account (as in model.proto)
  * - balance: the account's balance as of the newest transaction
  * - parent: the parent account, or null if this is at the top level.
@@ -246,7 +386,8 @@ dblbook.Entity.prototype.deleteAccount = function(transactionGuid) {
  *
  * @return {Array} An array of account objects.
  */
-dblbook.Entity.prototype.accounts = function() {
+dblbook.DB.prototype.accounts = function() {
+  return this._accounts;
 }
 
 /**
@@ -257,11 +398,23 @@ dblbook.Entity.prototype.accounts = function() {
  * The returned transactions are plain JavaScript objects with the following
  * members:
  *
+ * - db: link back to the database
  * - data: the raw data for this Transaction (as in model.proto)
- * - balances: an object mapping account guid to balance, only for accounts
- *   that have entries in this transaction.
+ * - accounts: an object mapping account guid to account info, only for accounts
+ *   that have entries in this transaction (and their parents). Each account
+ *   info object contains:
+ *
+ *   - balance: current cumulative balance for this account (includes all
+ *     transactions for this account and all sub-accounts).
+ *   - next: next transaction by time for this account.
+ *   - prev: prev transaction by time for this account.
+ *
+ *   Note that next/prev are by the account entry's *post* date, not the
+ *   transaction date, so the "next" transaction may not actually have a later
+ *   transaction time!
  *
  * @return {Array} An array of transaction objects.
  */
-dblbook.Entity.prototype.transactions = function() {
+dblbook.DB.prototype.transactions = function() {
+  return this._transactions;
 }

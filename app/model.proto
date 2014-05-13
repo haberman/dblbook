@@ -31,9 +31,17 @@ message Amount {
 
 message Entry {
   required string account_guid = 1;
-  required int64 time = 2;  // Round to day for less granularity
-  repeated Amount amount = 3;  // Only one per commodity allowed.
-  required string description = 4;
+  repeated Amount amount = 2;  // Only one per commodity allowed.
+
+  // If not present, uses the description of the transaction.
+  optional string description = 3;
+
+  // Reflects the "post date" for accounts that have some concept of
+  // that.  If not present, the transaction date will be considered to have
+  // posted at exactly the same time as the transaction.
+  //
+  // Format is: "YYYY-MM-DD" with trailing ordering suffix.
+  optional string postdate = 4;
 }
 
 // Grouping of transactions that must sum to zero.
@@ -43,13 +51,9 @@ message Transaction {
   // We could consider also having a guid which only pertains to this
   // *version* of the transaction.
   required string guid = 1;
+  required int64 timestamp = 2;  // usec since the epoch.
+  required string description = 3;
 
-  // Time and description are necessary only if you want to give some
-  // note on top of the individual times and descriptions of the individual
-  // transactions.
-  optional int64 time = 2;
-  optional string description = 3;
-
-  // The sum of these must be zero.
+  // There must be at least two, and they must sum to zero.
   repeated Entry entry = 4;
 }
