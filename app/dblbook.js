@@ -6,13 +6,6 @@ Array.prototype.last = Array.prototype.last || function() {
 
 function strcmp(a, b) { return a == b ? 0 : (a < b ? -1 : 1); }
 
-function guid() {
-  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random()*16|0, v = c == 'x' ? r : (r&0x3|0x8);
-    return v.toString(16);
-  });
-}
-
 function addAmounts() { return this[0].balance().add(this[1].amount()); }
 
 angular.module('dblbookControllers', [])

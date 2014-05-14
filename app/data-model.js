@@ -6,6 +6,14 @@
 
 var dblbook = {};
 
+dblbook.guid = function() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random()*16|0, v = c == 'x' ? r : (r&0x3|0x8);
+    return v.toString(16);
+  });
+}
+
+
 /**
  * Class for representing decimal numbers losslessly (unlike binary floating
  * point).  Instances are immutable.  Takes inspiration from the "decimal"
@@ -139,17 +147,12 @@ dblbook.Balance.prototype.add = function(other) {
       ret.commodities[commodity] = new dblbook.Decimal();
     }
     var sum = ret.commodities[commodity].add(other.commodities[commodity]);
-    console.log(sum.toString())
     if (sum.toString() == "0") {
       delete ret.commodities[commodity];
     } else {
       ret.commodities[commodity] = sum;
     }
   }
-  console.log("A + B = C")
-  console.log(this)
-  console.log(other)
-  console.log(ret)
   return ret;
 };
 
@@ -164,7 +167,6 @@ dblbook.Balance.prototype.dup = function() {
 dblbook.Balance.prototype.toString = function() {
   var strs = new Array();
   for (var commodity in this.commodities) {
-    //console.log(commodity);
     // Special-case commodities with common symbols.
     if (commodity == "USD") {
       strs.push("$" + this.commodities[commodity]);
@@ -187,6 +189,7 @@ dblbook.isArray = function(val) {
  * account must exist.
  */
 dblbook.accountIsValid = function(account) {
+  return typeof account.name == "string";
 }
 
 /**
@@ -295,6 +298,7 @@ dblbook.DB = function() {
 dblbook.DB.prototype._load = function() {
   this._transactions = [];
   this._accounts = [];
+  this.byGuid = {};
   /*
 
   var txn = this.db.transaction("transactions", "readonly");
@@ -321,6 +325,31 @@ dblbook.DB.prototype._load = function() {
  * @param {Account} account The account to add.
  */
 dblbook.DB.prototype.createAccount = function(account) {
+  var parent;
+
+  if (account.guid) {
+    throw "Do not specify a guid for a new account, the DB will choose one.";
+  }
+  if (account.parent_guid && !(parent = this.byGuid[account.parent_guid])) {
+    throw "parent account does not exist.";
+  }
+
+  account.guid = dblbook.guid();
+
+  Object.freeze(account);
+
+  var wrapped = {
+    "db": this,
+    "data": account,
+    "balance": new dblbook.Balance(),
+    "parent": parent,
+    "children": [],
+  };
+
+  this.byGuid[account.guid] = wrapped;
+  this._accounts.push(wrapped);
+
+  return true;
 }
 
 /**
@@ -332,6 +361,15 @@ dblbook.DB.prototype.createAccount = function(account) {
  * @param {Account} account The account to update.
  */
 dblbook.DB.prototype.updateAccount = function(account) {
+  if (!account.guid) {
+    throw "guid required.";
+  }
+  if (!this.byGuid[account.guid]) {
+    throw "account does not exist.";
+  }
+  if (account.parent_guid && !this.byGuid[account.parent_guid]) {
+    throw "parent account does not exist.";
+  }
 }
 
 /**
@@ -404,8 +442,11 @@ dblbook.DB.prototype.accounts = function() {
  *   that have entries in this transaction (and their parents). Each account
  *   info object contains:
  *
- *   - balance: current cumulative balance for this account (includes all
- *     transactions for this account and all sub-accounts).
+ *   - description: effective description (including defaulting txn's).
+ *   - date: either string postdate (for display) or integer timestamp from txn.
+ *   - amount: dblbook.Balance: amount for this txn.
+ *   - balance: dblbook.Balance: current cumulative balance for this account
+ *     (includes all transactions for this account and all sub-accounts).
  *   - next: next transaction by time for this account.
  *   - prev: prev transaction by time for this account.
  *
