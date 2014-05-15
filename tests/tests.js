@@ -5,14 +5,23 @@ function forget() { dblbook.DB.created = undefined; }
 
 function dbtest(name, func) {
   test(name, function() {
-    forget();
-    dblbook.openDB(function(db) {
-      ok(db instanceof dblbook.DB, "created object is DB");
-      func(db);
-      start();
+    // First delete the entire indexeddb.
+    dblbook.obliterateDB(function() {
+      // Next open a fresh DB from scratch.
+      forget();
+      dblbook.openDB(function(db) {
+        ok(db instanceof dblbook.DB, "created object is DB");
+        func(db);
+        db.idb.close();
+        start();
+      });
     });
     stop();
   });
+}
+
+function numChildren(account) {
+  return Object.keys(account.children).length;
 }
 
 test("transaction validity", function() {
@@ -51,8 +60,7 @@ test("account validity", function() {
 });
 
 dbtest("empty DB", function(db) {
-  deepEqual(db.transactions(), [], "empty db has empty transactions");
-  deepEqual(db.accounts(), [], "empty db has empty accounts");
+  ok(numChildren(db.getRootAccount()) == 0, "empty db has no accounts");
 });
 
 dbtest("multiple DBs not allowed", function() {
@@ -72,16 +80,26 @@ dbtest("CRUD account", function(db) {
     db.createAccount({"name":"Test", "parent_guid": "not-exists"})
   }, "can't create an account if parent doesn't exist");
 
+  ok(numChildren(db.getRootAccount()) == 0);
   ok(db.createAccount({"name":"Test"}), "create account 1");
-  ok(db.accounts().length == 1, "now there is one account");
-  ok(db.accounts()[0].data.guid, "created account has a guid");
-  ok(db.accounts()[0].data.name == "Test", "created account has correct name");
-  ok(db.accounts()[0].db === db, "created account has correct db");
-  ok(!db.accounts()[0].parent, "created account has no parent");
-  deepEqual(db.accounts()[0].children, [], "created account has no children");
+  ok(numChildren(db.getRootAccount()) == 1, "now there is one account");
+  var account = db.getRootAccount().children["Test"];
+  ok(account.data.guid, "created account has a guid");
+  ok(account.data.name == "Test", "created account has correct name");
+  ok(account.db === db, "created account has correct db");
+  ok(account.parent === db.getRootAccount(), "created account top as parent");
+  ok(numChildren(account) == 0, "created account has no children");
 
-  var account1_guid = db.accounts()[0].data.guid;
+  var account1_guid = account.data.guid;
 
-  ok(db.createAccount({"name":"Sub", "parent_guid":account1_guid}),
-     "create account 2");
+  var sub = db.createAccount({"name":"Sub", "parent_guid":account1_guid});
+  ok(sub, "create account 2");
+
+  ok(numChildren(account) == 1, "now Test account has sub-account");
+
+  // Move account to the top level.
+  ok(db.updateAccount({"guid":sub.data.guid, "name":"Sub"}));
+
+  ok(numChildren(db.getRootAccount()) == 2, "top-level now has two accounts");
+  ok(numChildren(account) == 0, "Test no longer has sub-account");
 });

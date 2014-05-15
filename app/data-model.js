@@ -223,7 +223,7 @@ dblbook.unbalancedTransactionAmount = function(txn) {
  */
 dblbook.transactionIsValid = function(txn) {
   if (typeof txn.timestamp != "number" ||
-      typeof txn.description != "string" || 
+      typeof txn.description != "string" ||
       !dblbook.isArray(txn.entry) ||
       txn.entry.length < 2) {
     return false;
@@ -232,6 +232,7 @@ dblbook.transactionIsValid = function(txn) {
   for (var i in txn.entry) {
     var entry = txn.entry[i]
     if (typeof entry.account_guid != "string" ||
+        entry.account_guid == "ACCOUNT_ROOT" ||
         !dblbook.isArray(entry.amount) ||
         entry.amount.length < 1) {
       return false;
@@ -262,26 +263,33 @@ dblbook.transactionIsValid = function(txn) {
  * @constructor
  */
 dblbook.openDB = function(callback) {
-  var self = this;
   var version = 1;
   var request = indexedDB.open("dblbook", version);
 
   request.onupgradeneeded = function(e) {
-    var db = request.result;
-    var store = db.createObjectStore("transactions", {keyPath: "guid"});
+    var idb = request.result;
+    var store = idb.createObjectStore("transactions", {keyPath: "guid"});
     var date_order = store.createIndex("time_order", "timestamp")
 
-    store = db.createObjectStore("accounts", {keyPath: "guid"});
+    store = idb.createObjectStore("accounts", {keyPath: "guid"});
+  }
+
+  request.onblocked = function(e) {
+    alert("Oops!");
+    console.log(e);
   }
 
   request.onsuccess = function() {
+    var idb = request.result;
+
     if (dblbook.DB.created) {
       callback(null, "Only one DB object allowed");
+      idb.close();
     } else {
       dblbook.DB.created = true;
 
       var db = new dblbook.DB();
-      db.db = request.result;
+      db.idb = idb;
       db._load();
       callback(db);
     }
@@ -292,13 +300,29 @@ dblbook.openDB = function(callback) {
   }
 }
 
+dblbook.obliterateDB = function(callback) {
+  var request = indexedDB.deleteDatabase("dblbook");
+  request.onsuccess = function() { callback(); }
+  request.onerror = function(event) {
+    console.log("Error in obliterate");
+    console.log(event);
+  }
+}
+
 dblbook.DB = function() {
 }
 
 dblbook.DB.prototype._load = function() {
   this._transactions = [];
-  this._accounts = [];
-  this.byGuid = {};
+  this.rootAccount = {
+    "db": this,
+    "balance": new dblbook.Balance(),
+    "children": {},
+  }
+
+  this.byGuid = {
+    "ACCOUNT_ROOT": this.rootAccount
+  };
   /*
 
   var txn = this.db.transaction("transactions", "readonly");
@@ -314,24 +338,43 @@ dblbook.DB.prototype._load = function() {
   */
 }
 
+dblbook.DB.prototype.newWriteTransaction = function(stores) {
+  var txn = this.idb.transaction(stores, "readwrite");
+  txn.onerror = function(event) {
+    console.log("Whoa, did not see that coming.");
+    console.log(event);
+    alert("Transaction failure!");
+  }
+  return txn;
+}
+
 /**
  * Adds an account.  Constraints:
  *
  * 1. account guid must not be set (one will be assigned).
  * 2. account must be valid.Account name and type should be set, but guid should be
- * unset (the object will assign one appropriately).  The parent_guid must be
- * set; for a top-level account the special value GUID_TOP should be used.
+ *    unset (the object will assign one appropriately).
+ * 3. the name must not be the same as any other account with this parent.
  *
  * @param {Account} account The account to add.
  */
 dblbook.DB.prototype.createAccount = function(account) {
-  var parent;
+  if (!dblbook.accountIsValid(account)) {
+    throw "invalid account";
+  }
 
   if (account.guid) {
     throw "Do not specify a guid for a new account, the DB will choose one.";
   }
-  if (account.parent_guid && !(parent = this.byGuid[account.parent_guid])) {
+
+  var parent = this.byGuid[account.parent_guid || "ACCOUNT_ROOT"];
+
+  if (!parent) {
     throw "parent account does not exist.";
+  }
+
+  if (parent.children[account.name]) {
+    throw "account already exists with this name";
   }
 
   account.guid = dblbook.guid();
@@ -343,13 +386,16 @@ dblbook.DB.prototype.createAccount = function(account) {
     "data": account,
     "balance": new dblbook.Balance(),
     "parent": parent,
-    "children": [],
+    "children": {},
   };
 
   this.byGuid[account.guid] = wrapped;
-  this._accounts.push(wrapped);
+  parent.children[account.name] = wrapped;
 
-  return true;
+  var txn = this.newWriteTransaction(["accounts"]);
+  txn.objectStore("accounts").add(account);
+
+  return wrapped;
 }
 
 /**
@@ -361,15 +407,46 @@ dblbook.DB.prototype.createAccount = function(account) {
  * @param {Account} account The account to update.
  */
 dblbook.DB.prototype.updateAccount = function(account) {
+  if (!dblbook.accountIsValid(account)) {
+    throw "invalid account";
+  }
+
   if (!account.guid) {
     throw "guid required.";
   }
-  if (!this.byGuid[account.guid]) {
+
+  var wrapped = this.byGuid[account.guid];
+
+  if (!wrapped) {
     throw "account does not exist.";
   }
-  if (account.parent_guid && !this.byGuid[account.parent_guid]) {
+
+  var oldParent = wrapped.parent;
+  var newParent = this.byGuid[account.parent_guid || "ACCOUNT_ROOT"];
+
+  if (!newParent) {
     throw "parent account does not exist.";
   }
+
+
+  if (oldParent !== newParent || wrapped.data.name != account.name) {
+    if (newParent.children[account.name]) {
+      throw "account already exists with this name";
+    }
+
+    delete oldParent.children[wrapped.data.name];
+    newParent.children[account.name] = wrapped;
+    wrapped.parent = newParent;
+  }
+
+  Object.freeze(account);
+
+  wrapped.data = account;
+
+  var txn = this.newWriteTransaction(["accounts"]);
+  txn.objectStore("accounts").put(account);
+
+  return wrapped;
 }
 
 /**
@@ -381,6 +458,22 @@ dblbook.DB.prototype.updateAccount = function(account) {
  * @param {string} accountGuid The guid of the account to delete.
  */
 dblbook.DB.prototype.deleteAccount = function(accountGuid) {
+  var account = this.byGuid[accountGuid];
+
+  if (!account) {
+    throw "account does not exist.";
+  }
+
+  if (account.last) {
+    throw "cannot delete account with any transactions";
+  }
+
+  if (account.parent) {
+    delete account.parent.children[account.data.name];
+  }
+
+  var txn = this.newWriteTransaction(["accounts"]);
+  txn.objectStore("accounts").delete(accountGuid);
 }
 
 /**
@@ -421,20 +514,10 @@ dblbook.DB.prototype.deleteTransaction = function(transactionGuid) {
  * - balance: the account's balance as of the newest transaction
  * - parent: the parent account, or null if this is at the top level.
  * - children: an array of children, which may be empty.
+ * - last: the most recent transaction for this account, or null if none.
  *
- * @return {Array} An array of account objects.
- */
-dblbook.DB.prototype.accounts = function() {
-  return this._accounts;
-}
-
-/**
- * Returns a list of transactions, in chronological order.
- * We will likely want to support lazy loading, in which case this return all
- * *loaded* transactions.
- *
- * The returned transactions are plain JavaScript objects with the following
- * members:
+ * All the transactions ("last" and everything linked from it) are plain
+ * JavaScript objects with the following members:
  *
  * - db: link back to the database
  * - data: the raw data for this Transaction (as in model.proto)
@@ -447,15 +530,15 @@ dblbook.DB.prototype.accounts = function() {
  *   - amount: dblbook.Balance: amount for this txn.
  *   - balance: dblbook.Balance: current cumulative balance for this account
  *     (includes all transactions for this account and all sub-accounts).
- *   - next: next transaction by time for this account.
- *   - prev: prev transaction by time for this account.
+ *   - next: next transaction by time for this account (or any sub-account).
+ *   - prev: prev transaction by time for this account (or any sub-account).
  *
  *   Note that next/prev are by the account entry's *post* date, not the
  *   transaction date, so the "next" transaction may not actually have a later
  *   transaction time!
  *
- * @return {Array} An array of transaction objects.
+ * @return {Array} An array of account objects.
  */
-dblbook.DB.prototype.transactions = function() {
-  return this._transactions;
+dblbook.DB.prototype.getRootAccount = function() {
+  return this.rootAccount;
 }
