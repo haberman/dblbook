@@ -313,14 +313,13 @@ dblbook.DB = function() {
 }
 
 dblbook.DB.prototype._load = function() {
-  this._transactions = [];
   this.rootAccount = {
     "db": this,
     "balance": new dblbook.Balance(),
     "children": {},
   }
 
-  this.byGuid = {
+  this.accountsByGuid = {
     "ACCOUNT_ROOT": this.rootAccount
   };
   /*
@@ -367,7 +366,7 @@ dblbook.DB.prototype.createAccount = function(account) {
     throw "Do not specify a guid for a new account, the DB will choose one.";
   }
 
-  var parent = this.byGuid[account.parent_guid || "ACCOUNT_ROOT"];
+  var parent = this.accountsByGuid[account.parent_guid || "ACCOUNT_ROOT"];
 
   if (!parent) {
     throw "parent account does not exist.";
@@ -389,7 +388,7 @@ dblbook.DB.prototype.createAccount = function(account) {
     "children": {},
   };
 
-  this.byGuid[account.guid] = wrapped;
+  this.accountsByGuid[account.guid] = wrapped;
   parent.children[account.name] = wrapped;
 
   var txn = this.newWriteTransaction(["accounts"]);
@@ -415,14 +414,14 @@ dblbook.DB.prototype.updateAccount = function(account) {
     throw "guid required.";
   }
 
-  var wrapped = this.byGuid[account.guid];
+  var wrapped = this.accountsByGuid[account.guid];
 
   if (!wrapped) {
     throw "account does not exist.";
   }
 
   var oldParent = wrapped.parent;
-  var newParent = this.byGuid[account.parent_guid || "ACCOUNT_ROOT"];
+  var newParent = this.accountsByGuid[account.parent_guid || "ACCOUNT_ROOT"];
 
   if (!newParent) {
     throw "parent account does not exist.";
@@ -458,7 +457,7 @@ dblbook.DB.prototype.updateAccount = function(account) {
  * @param {string} accountGuid The guid of the account to delete.
  */
 dblbook.DB.prototype.deleteAccount = function(accountGuid) {
-  var account = this.byGuid[accountGuid];
+  var account = this.accountsByGuid[accountGuid];
 
   if (!account) {
     throw "account does not exist.";

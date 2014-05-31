@@ -1,66 +1,104 @@
+/** @jsx React.DOM */
 
-Array.prototype.last = Array.prototype.last || function() {
-    var l = this.length;
-    return this[l-1];
+function repeat(str, times) {
+  return new Array(times + 1).join(str);
 }
 
-function strcmp(a, b) { return a == b ? 0 : (a < b ? -1 : 1); }
+function isEmptyObject(obj) {
+  console.log(obj);
+  console.log(Object.keys(obj) == 0);
+  return Object.keys(obj).length == 0;
+}
 
-function addAmounts() { return this[0].balance().add(this[1].amount()); }
+var nbsp = String.fromCharCode(160)
 
-angular.module('dblbookControllers', [])
-  .controller('HomeCtrl', ['$scope',
-    function ($scope) {
-      $scope.entities = [
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"},
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$105"},
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$0"},
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$111"},
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$34"},
-        {"id": "entity1", "name": "Yo My Entity 7", "netWorth": "$5"},
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"},
-        {"id": "entity1", "name": "Yo My Entity 1", "netWorth": "$5"}
-      ];
-    }])
+var AccountList = React.createClass({
+  getInitialState: function() {
+    return {editing: false};
+  },
 
-  .controller('EntityCtrl', ['$scope', '$routeParams',
-    function($scope, $routeParams) {
-      $scope.entityId = $routeParams.id;
-      $scope.editing = false;
-      $scope.subpage = "accounts";
+  render: function() {
+    return <div>
+      <ul className="account_list">
+        <li className="clearfix header">
+          <div className="accountlist_name">{repeat(nbsp, 8)}Account</div>
+          <div className="accountlist_balance">Balance</div>
+        </li>
+        <AccountChildren account={this.props.root} depth={0} show={true} />
+      </ul>
+      <a ng-click="edit()" className="btn clearfix" style={{"float": "right"}}>Edit</a>
+    </div>
+      ;
+  }
+});
 
-      $scope.edit = function() {
-        $scope.editing = true;
-      }
+var Account = React.createClass({
+  getInitialState: function() {
+    return {expanded: false};
+  },
 
-      $scope.finishEdit = function() {
-        $scope.editing = false;
-      }
-    }]);
+  renderTriangle: function() {
+    var cls = "icon-play";
+    if (isEmptyObject(this.props.account.children)) {
+      cls += " myhide";
+    }
+    return <i className={cls} onClick={this.props.ontoggle} />
+  },
 
-angular.module('dblbookApp', [
-    'ngRoute',
-    'dblbookControllers',
-    'ui.bootstrap'])
+  render: function() {
+          //<i ng-show="account.children.length() > 0" class="icon-play" ng-click="toggle()"
+          //   ng-style="{ triangleOpen: open }"></i>
+    return <li className="clearfix">
+        <div className="accountlist_name">
+          {repeat(nbsp, this.props.depth * 4)}
+          {this.renderTriangle()}
+          &nbsp;&nbsp;&nbsp;
+          <a href="#">{this.props.account.data.name}</a>
+        </div>
+        <div className="accountlist_balance">{"$1000"}&nbsp;</div>
+      </li>;
+  }
+});
 
-  .config(['$routeProvider',
-    function($routeProvider) {
-      $routeProvider.
-        when('/entity/:id', {
-          templateUrl: 'entity.html',
-        }).
-        otherwise({
-          templateUrl: 'home.html',
-        });
-    }])
+var AccountChildren = React.createClass({
+  getInitialState: function() {
+    return {};
+  },
 
-  .directive("applink", ['$location',
-    function ($location) {
-      return {
-        link: function (scope, element, attrs) {
-          element.bind("click", function () {
-            scope.$apply($location.path(attrs.applink))
-          });
-        }
-      }
-    }]);
+  onToggle: function(guid, event) {
+    var newState = {};
+    newState[guid] = !this.state[guid];
+    this.setState(newState);
+  },
+
+  makeChildren: function() {
+    var children = [];
+    for (var childName in this.props.account.children) {
+      var child = this.props.account.children[childName];
+      var expanded = this.state[child.data.guid];
+      children.push(
+        <Account key={child.data.guid}
+                 account={child}
+                 depth={this.props.depth + 1}
+                 ontoggle={this.onToggle.bind(this, child.data.guid)} />);
+      children.push(
+        <AccountChildren key={"childrenOf" + child.data.guid}
+                         account={child}
+                         depth={this.props.depth + 1}
+                         show={expanded} />);
+    }
+    return children;
+  },
+
+  render: function() {
+    var style = {"display": this.props.show ? "block" : "none"};
+    return <ul className="account_list" style={style}>{this.makeChildren()}</ul>;
+  }
+});
+
+dblbook.openDB(function(db) {
+  var account = db.createAccount({"name":"Test"});
+  var sub = db.createAccount({"name":"Sub", "parent_guid":account.data.guid});
+  React.renderComponent(<AccountList root={db.getRootAccount()} />,
+                        document.getElementById("content"));
+});

@@ -102,4 +102,8 @@ dbtest("CRUD account", function(db) {
 
   ok(numChildren(db.getRootAccount()) == 2, "top-level now has two accounts");
   ok(numChildren(account) == 0, "Test no longer has sub-account");
+
+  throws(function() {
+    db.createAccount({"name":"Test"})
+  }, "can't create account with duplicate name");
 });
