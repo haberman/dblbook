@@ -26,14 +26,52 @@ var DblbookSubscribeMixin = {
   // subscriptions, so that only ones that are "renewed" in render() are
   // kept.
   componentWillUpdate: function() {
-    this.db.unsubscribe(this);
+    if (this.db) {
+      this.db.unsubscribe(this);
+    }
   },
 
   // Called automatically when the component is being unmounted.
   componentWillUnmount: function() {
-    this.db.unsubscribe(this);
+    if (this.db) {
+      this.db.unsubscribe(this);
+    }
   }
 };
+
+/**
+ * Component for rendering the accounts page.
+ */
+var AccountPage = React.createClass({
+  mixins: [DblbookSubscribeMixin],
+
+  render: function() {
+    var uploadGnucash = <div>
+      <br/>
+      <br/>
+      <br/>
+      <br/>
+      <div>
+        Upload a GnuCash file:<br/><input id="import" type="file" onChange={importGnucash} />
+      </div>
+    </div>;
+
+    this.subscribe(this.props.db.getRealRoot());
+    if (!isEmptyObject(this.props.db.getRealRoot().children)) {
+      uploadGnucash = null;
+    }
+
+    return <div>
+      <h2>Assets and Liabilities</h2>
+      <AccountList root={this.props.db.getRealRoot()} key="REAL" />
+      <h2>Income and Expenses</h2>
+      <AccountList root={this.props.db.getNominalRoot()} key="NOMINAL" />
+      <br/>
+      <a ng-click="edit()" className="pure-button" style={{"float": "right"}}>Edit Accounts</a>
+      {uploadGnucash}
+    </div>;
+  }
+});
 
 /**
  * Component for rendering the account list.
@@ -52,10 +90,16 @@ var AccountList = React.createClass({
   },
 
   renderChildren: function(account, depth, children) {
-    this.subscribe(account);
-
+    var childNames = [];
     for (var childName in account.children) {
-      var child = account.children[childName];
+      childNames.push(childName);
+    }
+
+    childNames.sort();
+
+    childNames.forEach(function(name) {
+      var child = account.children[name];
+      this.subscribe(child);
       var expanded = this.state[child.data.guid];
       children.push(
         <Account key={child.data.guid}
@@ -66,36 +110,30 @@ var AccountList = React.createClass({
       if (expanded) {
         this.renderChildren(child, depth + 1, children)
       }
-    }
+    }, this);
   },
 
   render: function() {
     var children = []
+    this.subscribe(this.props.root);
     this.renderChildren(this.props.root, 0, children);
+    children.push(<tr key="Net Worth">
+      <td><b>Net Worth</b></td>
+      <td>$2000</td>
+    </tr>);
 
-    return <div>
-      <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
-        <thead>
-          <tr>
-            <th>{repeat(nbsp, 8)}Account</th>
-            <th>Balance</th>
-          </tr>
-        </thead>
+    return <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
+      <thead>
+        <tr>
+          <th>{repeat(nbsp, 8)}Account</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
 
-        <tbody>
-          {children}
-        </tbody>
-      </table>
-      <br/>
-      <a ng-click="edit()" className="pure-button" style={{"float": "right"}}>Edit Accounts</a>
-      <br/>
-      <br/>
-      <br/>
-      <br/>
-      <div>
-        Upload a GnuCash file:<br/><input id="import" type="file" onChange={importGnucash} />
-      </div>
-    </div>;
+      <tbody>
+        {children}
+      </tbody>
+    </table>;
   }
 });
 
@@ -136,6 +174,6 @@ var Account = React.createClass({
 
 dblbook.openDB(function(db) {
   document.db = db;
-  React.renderComponent(<AccountList root={db.getRootAccount()} />,
+  React.renderComponent(<AccountPage db={db} />,
                         document.getElementById("content"));
 });

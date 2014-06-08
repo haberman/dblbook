@@ -56,18 +56,26 @@ function toposort(nodes) {
     visited[i] = true
 
     // outgoing edges
-    console.log(node);
     var outgoing = node.parent_guid ? [byGuid[node.parent_guid]] : []
     if (i = outgoing.length) {
       var preds = predecessors.concat(node)
       do {
         var child = outgoing[--i]
-        console.log(child);
         visit(child, nodes.indexOf(child), preds)
       } while (i)
     }
 
     sorted[--cursor] = node
+  }
+}
+
+function rootForType(type) {
+  if (type == "ASSET" || type == "LIABILITY") {
+    return "REAL_ROOT";
+  } else if (type == "INCOME" || type == "EXPENSE") {
+    return "NOMINAL_ROOT";
+  } else {
+    throw "Unexpected account type " + type;
   }
 }
 
@@ -247,7 +255,13 @@ dblbook.isArray = function(val) {
  * account must exist.
  */
 dblbook.accountIsValid = function(account) {
-  return typeof account.name == "string";
+  var ret = typeof account.name == "string" &&
+      typeof account.type == "string" &&
+      typeof rootForType(account.type) == "string";
+  if (!ret) {
+    console.log("Invalid account: ", account);
+  }
+  return ret;
 }
 
 /**
@@ -290,7 +304,8 @@ dblbook.transactionIsValid = function(txn) {
   for (var i in txn.entry) {
     var entry = txn.entry[i]
     if (typeof entry.account_guid != "string" ||
-        entry.account_guid == "ACCOUNT_ROOT" ||
+        entry.account_guid == "REAL_ROOT" ||
+        entry.account_guid == "NOMINAL_ROOT" ||
         !dblbook.isArray(entry.amount) ||
         entry.amount.length < 1) {
       return false;
@@ -372,15 +387,17 @@ dblbook.DB = function() {
 dblbook.DB.prototype._load = function() {
   var self = this;
 
-  this.rootAccount = {
-    "data": "dblbook root account!",
-    "db": this,
-    "balance": new dblbook.Balance(),
-    "children": {},
-  }
-
   this.accountsByGuid = {
-    "ACCOUNT_ROOT": this.rootAccount
+    "REAL_ROOT": {
+      "data": "dblbook real root account!",
+      "db": this,
+      "children": {},
+    },
+    "NOMINAL_ROOT": {
+      "data": "dblbook real root account!",
+      "db": this,
+      "children": {},
+    },
   };
 
   this.subscriptionsByObject = {};
@@ -391,14 +408,11 @@ dblbook.DB.prototype._load = function() {
   txn.objectStore("accounts").openCursor().onsuccess = function(event) {
     var cursor = event.target.result;
     if (cursor) {
-      console.log(cursor.value);
       accounts.push(cursor.value);
       cursor.continue();
     } else {
-      console.log(accounts);
       accounts = toposort(accounts);
       accounts.reverse();
-      console.log(accounts);
 
       accounts.forEach(function(account) {
         self._doCreateAccount(account);
@@ -426,11 +440,10 @@ dblbook.DB.prototype._doCreateAccount = function(account) {
     throw "invalid account";
   }
 
-  var parentGuid = account.parent_guid || "ACCOUNT_ROOT";
+  var parentGuid = account.parent_guid || rootForType(account.type);
   var parent = this.accountsByGuid[parentGuid];
 
   if (!parent) {
-    console.log(account);
     throw "parent account does not exist.";
   }
 
@@ -514,7 +527,8 @@ dblbook.DB.prototype.updateAccount = function(account) {
   }
 
   var oldParent = wrapped.parent;
-  var newParent = this.accountsByGuid[account.parent_guid || "ACCOUNT_ROOT"];
+  var newParent =
+      this.accountsByGuid[account.parent_guid || rootForType(account.type)];
 
   if (!newParent) {
     throw "parent account does not exist.";
@@ -639,8 +653,12 @@ dblbook.DB.prototype.deleteTransaction = function(transactionGuid) {
  *
  * @return {Array} An array of account objects.
  */
-dblbook.DB.prototype.getRootAccount = function() {
-  return this.rootAccount;
+dblbook.DB.prototype.getRealRoot = function() {
+  return this.accountsByGuid["REAL_ROOT"];
+}
+
+dblbook.DB.prototype.getNominalRoot = function() {
+  return this.accountsByGuid["NOMINAL_ROOT"];
 }
 
 /**

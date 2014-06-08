@@ -9,6 +9,14 @@ function getXmlText(node, ns, name) {
   return found ? found.innerHTML : undefined;
 }
 
+function mapType(type) {
+  if (type == "BANK") {
+    return "ASSET";
+  } else {
+    return type;
+  }
+}
+
 function importGnucash2(xmlString, db, rootForNew) {
   // Namespaces.
   var gnc = "http://www.gnucash.org/XML/gnc";
@@ -23,13 +31,16 @@ function importGnucash2(xmlString, db, rootForNew) {
     var newAccount = {
       guid: getXmlText(gnucashAccount, act, "id"),
       name: getXmlText(gnucashAccount, act, "name"),
+      type: mapType(getXmlText(gnucashAccount, act, "type")),
     }
 
-    var type = getXmlText(gnucashAccount, act, "type");
-
     // We count on seeing the parent first.
-    if (type == "ROOT") {
+    if (newAccount.type == "ROOT") {
+      delete newAccount.type;
       gnucashRootGuid = newAccount.guid;
+    } else if (newAccount.type == "EQUITY") {
+      // Skip for now.
+      console.log("Skipping: ", newAccount)
     } else {
       var parentGuid = getXmlText(gnucashAccount, act, "parent");
       if (parentGuid == gnucashRootGuid) {
