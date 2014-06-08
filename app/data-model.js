@@ -13,6 +13,64 @@ dblbook.guid = function() {
   });
 }
 
+dblbook.appendNested = function(base, key, val) {
+  if (!base[key]) {
+    base[key] = []
+  }
+  base[key].push(val);
+}
+
+dblbook.removeNested = function(base, key, remove) {
+  if (!base[key]) {
+    return;
+  }
+
+  base[key] = base[key].filter(function(elem) { return !remove(elem) });
+
+  if (base[key].length == 0) {
+    delete base[key];
+  }
+}
+
+function toposort(nodes) {
+  var cursor = nodes.length;
+  var sorted = new Array(cursor);
+  var visited = {};
+  var i = cursor;
+  var byGuid = {};
+
+  nodes.forEach(function(node) { byGuid[node.guid] = node });
+
+  while (i--) {
+    if (!visited[i]) visit(nodes[i], i, [])
+  }
+
+  return sorted
+
+  function visit(node, i, predecessors) {
+    if(predecessors.indexOf(node) >= 0) {
+      throw new Error('Cyclic dependency: '+JSON.stringify(node))
+    }
+
+    if (visited[i]) return;
+    visited[i] = true
+
+    // outgoing edges
+    console.log(node);
+    var outgoing = node.parent_guid ? [byGuid[node.parent_guid]] : []
+    if (i = outgoing.length) {
+      var preds = predecessors.concat(node)
+      do {
+        var child = outgoing[--i]
+        console.log(child);
+        visit(child, nodes.indexOf(child), preds)
+      } while (i)
+    }
+
+    sorted[--cursor] = node
+  }
+}
+
 
 /**
  * Class for representing decimal numbers losslessly (unlike binary floating
@@ -304,8 +362,7 @@ dblbook.obliterateDB = function(callback) {
   var request = indexedDB.deleteDatabase("dblbook");
   request.onsuccess = function() { callback(); }
   request.onerror = function(event) {
-    console.log("Error in obliterate");
-    console.log(event);
+    console.log("Error in obliterate", event);
   }
 }
 
@@ -313,7 +370,10 @@ dblbook.DB = function() {
 }
 
 dblbook.DB.prototype._load = function() {
+  var self = this;
+
   this.rootAccount = {
+    "data": "dblbook root account!",
     "db": this,
     "balance": new dblbook.Balance(),
     "children": {},
@@ -322,6 +382,30 @@ dblbook.DB.prototype._load = function() {
   this.accountsByGuid = {
     "ACCOUNT_ROOT": this.rootAccount
   };
+
+  this.subscriptionsByObject = {};
+  this.subscribers = {};
+
+  var txn = this.idb.transaction("accounts", "readonly");
+  var accounts = []
+  txn.objectStore("accounts").openCursor().onsuccess = function(event) {
+    var cursor = event.target.result;
+    if (cursor) {
+      console.log(cursor.value);
+      accounts.push(cursor.value);
+      cursor.continue();
+    } else {
+      console.log(accounts);
+      accounts = toposort(accounts);
+      accounts.reverse();
+      console.log(accounts);
+
+      accounts.forEach(function(account) {
+        self._doCreateAccount(account);
+      });
+    }
+  }
+
   /*
 
   var txn = this.db.transaction("transactions", "readonly");
@@ -337,38 +421,16 @@ dblbook.DB.prototype._load = function() {
   */
 }
 
-dblbook.DB.prototype.newWriteTransaction = function(stores) {
-  var txn = this.idb.transaction(stores, "readwrite");
-  txn.onerror = function(event) {
-    console.log("Whoa, did not see that coming.");
-    console.log(event);
-    alert("Transaction failure!");
-  }
-  return txn;
-}
-
-/**
- * Adds an account.  Constraints:
- *
- * 1. account guid must not be set (one will be assigned).
- * 2. account must be valid.Account name and type should be set, but guid should be
- *    unset (the object will assign one appropriately).
- * 3. the name must not be the same as any other account with this parent.
- *
- * @param {Account} account The account to add.
- */
-dblbook.DB.prototype.createAccount = function(account) {
+dblbook.DB.prototype._doCreateAccount = function(account) {
   if (!dblbook.accountIsValid(account)) {
     throw "invalid account";
   }
 
-  if (account.guid) {
-    throw "Do not specify a guid for a new account, the DB will choose one.";
-  }
-
-  var parent = this.accountsByGuid[account.parent_guid || "ACCOUNT_ROOT"];
+  var parentGuid = account.parent_guid || "ACCOUNT_ROOT";
+  var parent = this.accountsByGuid[parentGuid];
 
   if (!parent) {
+    console.log(account);
     throw "parent account does not exist.";
   }
 
@@ -376,7 +438,13 @@ dblbook.DB.prototype.createAccount = function(account) {
     throw "account already exists with this name";
   }
 
-  account.guid = dblbook.guid();
+  if (account.guid) {
+    if (this.accountsByGuid[account.guid]) {
+      throw "Tried to duplicate existing account";
+    }
+  } else {
+    account.guid = dblbook.guid();
+  }
 
   Object.freeze(account);
 
@@ -391,10 +459,35 @@ dblbook.DB.prototype.createAccount = function(account) {
   this.accountsByGuid[account.guid] = wrapped;
   parent.children[account.name] = wrapped;
 
-  var txn = this.newWriteTransaction(["accounts"]);
-  txn.objectStore("accounts").add(account);
+  this._notifyChange(parent);
 
   return wrapped;
+}
+
+dblbook.DB.prototype.newWriteTransaction = function(stores) {
+  var txn = this.idb.transaction(stores, "readwrite");
+  txn.onerror = function(event) {
+    console.log("Whoa, did not see that coming.", event);
+    alert("Transaction failure!");
+  }
+  return txn;
+}
+
+/**
+ * Adds an account.  Constraints:
+ *
+ * 1. account guid may or may not be set (one will be assigned if not).
+ * 2. account must be valid.Account name and type should be set, but guid should be
+ *    unset (the object will assign one appropriately).
+ * 3. the name must not be the same as any other account with this parent.
+ *
+ * @param {Account} account The account to add.
+ */
+dblbook.DB.prototype.createAccount = function(account) {
+  var ret = this._doCreateAccount(account);
+  var txn = this.newWriteTransaction(["accounts"]);
+  txn.objectStore("accounts").add(account);
+  return ret;
 }
 
 /**
@@ -435,6 +528,10 @@ dblbook.DB.prototype.updateAccount = function(account) {
 
     delete oldParent.children[wrapped.data.name];
     newParent.children[account.name] = wrapped;
+
+    this._notifyChange(oldParent);
+    this._notifyChange(newParent);
+
     wrapped.parent = newParent;
   }
 
@@ -469,6 +566,10 @@ dblbook.DB.prototype.deleteAccount = function(accountGuid) {
 
   if (account.parent) {
     delete account.parent.children[account.data.name];
+    this._notifyChange(account.parent);
+    // Should we notify the account itself?
+    // Then any view that depends on it could just
+    // redirect somewhere else?
   }
 
   var txn = this.newWriteTransaction(["accounts"]);
@@ -540,4 +641,59 @@ dblbook.DB.prototype.deleteTransaction = function(transactionGuid) {
  */
 dblbook.DB.prototype.getRootAccount = function() {
   return this.rootAccount;
+}
+
+/**
+ * Subscribes to changes for this object.
+ * Overwrites any existing callback for this obj/subscriber pair.
+ */
+dblbook.DB.prototype.subscribe = function(subscriber, obj, cb) {
+  // Adding properties to "subscriber" and "obj" is gross.
+  // But JavaScript doesn't let you use objects as object keys with
+  // identity (===) semantics, so this is our least-bad alternative.
+  this.unsubscribe(subscriber, obj);
+  dblbook.appendNested(obj, "__subscribers", [subscriber, cb]);
+  dblbook.appendNested(subscriber, "__subscribed_to", obj);
+}
+
+/**
+ * Unsubscribes to whatever we subscribed to as this subscriber.
+ */
+dblbook.DB.prototype.unsubscribe = function(subscriber, obj) {
+  var objs;
+  if (obj) {
+    objs = [obj];
+  } else {
+    objs = subscriber.__subscribed_to || [];
+  }
+
+  objs.forEach(function(thisObj) {
+    dblbook.removeNested(thisObj, "__subscribers", function(pair) {
+      return subscriber === pair[0];
+    });
+  });
+
+  dblbook.removeNested(subscriber, "__subscribed_to", function(thisObj) {
+    if (!obj) {
+      // Remove all.
+      return true;
+    } else if (obj === thisObj) {
+      // Remove because this object matches.
+      return true;
+    }
+    return false;
+  });
+}
+
+dblbook.DB.prototype._notifyChange = function(obj) {
+  var subscriptions = obj.__subscribers || [];
+  var callbacks = [];
+
+  subscriptions.forEach(function(pair) {
+    callbacks.push(pair[1]);
+  });
+
+  callbacks.forEach(function(cb) {
+    cb();
+  });
 }

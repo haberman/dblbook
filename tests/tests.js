@@ -107,3 +107,67 @@ dbtest("CRUD account", function(db) {
     db.createAccount({"name":"Test"})
   }, "can't create account with duplicate name");
 });
+
+dbtest("Change notifications", function(db) {
+  var notified = 0;
+  db.subscribe(this, db.getRootAccount(), function() {
+    notified += 1;
+  });
+
+  ok(db.createAccount({"name":"Test"}), "create account 1");
+  equal(notified, 1, "Adding an account notifies root (child list)");
+
+  ok(db.createAccount({"name":"Test2"}), "create account 2");
+  equal(notified, 2, "Adding an account (2) notifies root (child list)");
+
+  db.unsubscribe(this);
+
+  ok(db.createAccount({"name":"Test3"}), "create account 3");
+  equal(notified, 2, "Adding an account (3) does NOT notify because we unsub'd");
+
+  var notified2 = 0;
+  db.subscribe(this, db.getRootAccount(), function() {
+    notified2 += 1;
+  });
+
+  ok(db.createAccount({"name":"Test4"}), "create account 4");
+  equal(notified, 2, "Adding an account (4) does NOT notify because we unsub'd");
+  equal(notified2, 1, "Adding an account (4) notifies second subscription");
+
+  var notified3 = 0;
+  var testAccount = db.getRootAccount().children["Test"];
+  ok(testAccount);
+  var testAccountGuid = testAccount.data.guid;
+  db.subscribe(this, testAccount, function() {
+    notified3 += 1;
+  });
+
+  var sub = db.createAccount({"name":"Sub", "parent_guid":testAccountGuid});
+  equal(notified3, 1);
+  equal(notified2, 1);
+  equal(notified, 2);
+
+  ok(db.createAccount({"name":"Test5"}), "create account 5");
+  equal(notified3, 1);
+  equal(notified2, 2);
+  equal(notified, 2);
+
+  var notified4 = 0;
+  var subscriber2 = {};
+  db.subscribe(subscriber2, db.getRootAccount(), function() {
+    notified4 += 1;
+  });
+
+  ok(db.createAccount({"name":"Test6"}), "create account 6");
+  equal(notified4, 1);
+  equal(notified3, 1);
+  equal(notified2, 3);
+  equal(notified, 2);
+
+  db.unsubscribe(this);
+  ok(db.createAccount({"name":"Test7"}), "create account 7");
+  equal(notified4, 2);
+  equal(notified3, 1);
+  equal(notified2, 3);
+  equal(notified, 2);
+});

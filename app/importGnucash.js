@@ -1,0 +1,54 @@
+
+function parseXml(str) {
+  parser = new DOMParser();
+  return parser.parseFromString(str, "text/xml");
+}
+
+function getXmlText(node, ns, name) {
+  var found = node.getElementsByTagNameNS(ns, name)[0];
+  return found ? found.innerHTML : undefined;
+}
+
+function importGnucash2(xmlString, db, rootForNew) {
+  // Namespaces.
+  var gnc = "http://www.gnucash.org/XML/gnc";
+  var act = "http://www.gnucash.org/XML/act";
+  var xml = parseXml(xmlString);
+
+  var gnucashRootGuid;
+
+  var accounts = xml.getElementsByTagNameNS(gnc, "account");
+  for (var i = 0; i < accounts.length; i++) {
+    var gnucashAccount = accounts[i];
+    var newAccount = {
+      guid: getXmlText(gnucashAccount, act, "id"),
+      name: getXmlText(gnucashAccount, act, "name"),
+    }
+
+    var type = getXmlText(gnucashAccount, act, "type");
+
+    // We count on seeing the parent first.
+    if (type == "ROOT") {
+      gnucashRootGuid = newAccount.guid;
+    } else {
+      var parentGuid = getXmlText(gnucashAccount, act, "parent");
+      if (parentGuid == gnucashRootGuid) {
+        newAccount.parent_guid = rootForNew;
+      } else {
+        newAccount.parent_guid = parentGuid;
+      }
+
+      db.createAccount(newAccount);
+    }
+  }
+}
+
+function importGnucash(event) {
+  var reader = new FileReader();
+  reader.onload = (function(e) {
+    importGnucash2(reader.result, document.db);
+  });
+  reader.onerror = (function(e) {
+  });
+  reader.readAsText(event.target.files[0]);
+}

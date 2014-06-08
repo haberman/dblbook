@@ -24,6 +24,7 @@ message Decimal {
   required int64 precision = 2;
 }
 
+// Remove and force every account to have exactly one currency?
 message Amount {
   required Decimal quantity = 1;
   required string commodity = 2;  // ie. "USD", "AAPL", "OzGold", etc
