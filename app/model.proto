@@ -9,6 +9,11 @@ message Account {
 
   required string name = 3;
 
+  // ISO4217 currency identifiers (eg. "USD") are GUIDs.
+  // Other namespaces can be introduced with colons (ie. NASDAQ:GOOG).
+  // Very unique things (like "my house") should generate real GUIDs.
+  required string commodity_guid = 4;
+
   // Count towards net worth?  false for income/expense accounts.
   enum Type {
     TYPE_ASSET = 0;
@@ -16,23 +21,12 @@ message Account {
     TYPE_INCOME = 2;
     TYPE_EXPENSE = 3;
   }
-  required Type type = 4;
-}
-
-message Decimal {
-  required int64 value = 1;
-  required int64 precision = 2;
-}
-
-// Remove and force every account to have exactly one currency?
-message Amount {
-  required Decimal quantity = 1;
-  required string commodity = 2;  // ie. "USD", "AAPL", "OzGold", etc
+  required Type type = 5;
 }
 
 message Entry {
   required string account_guid = 1;
-  repeated Amount amount = 2;  // Only one per commodity allowed.
+  required string amount = 2;  // As a string decimal, eg. 123.45
 
   // If not present, uses the description of the transaction.
   optional string description = 3;

@@ -323,10 +323,10 @@ dblbook.transactionIsValid = function(txn) {
  * Class for representing a set of accounts and transactions for some entity
  * (like a person or a business).
  *
- * This object abstracts away the specific storage backend.  We provide a
- * transactional update API, but it is up to the specific implementation when
- * or if this is committed to a transactional data store or whether it is
- * replicated anywhere.
+ * This object maintains a consistent view of the data.  Some data is kept
+ * directly in memory (as JS objects), the data is always written to a local
+ * indexedDB, and the data can optionally be replicated to/from some kind of
+ * cloud storage also.
  *
  * If we get fancy later on this might grow some functionality for performing
  * merges if there were concurrent mutations.
@@ -360,10 +360,7 @@ dblbook.openDB = function(callback) {
       idb.close();
     } else {
       dblbook.DB.created = true;
-
-      var db = new dblbook.DB();
-      db.idb = idb;
-      db._load();
+      var db = new dblbook.DB(idb, callback);
       callback(db);
     }
   }
@@ -375,48 +372,47 @@ dblbook.openDB = function(callback) {
 
 dblbook.obliterateDB = function(callback) {
   var request = indexedDB.deleteDatabase("dblbook");
-  request.onsuccess = function() { callback(); }
+  request.onsuccess = function() {
+    callback();
+  }
   request.onerror = function(event) {
     console.log("Error in obliterate", event);
   }
 }
 
-dblbook.DB = function() {
-}
-
-dblbook.DB.prototype._load = function() {
+dblbook.DB = function(idb, callback) {
   var self = this;
 
+  this.idb = idb;
   this.accountsByGuid = {
-    "REAL_ROOT": {
-      "data": "dblbook real root account!",
-      "db": this,
-      "children": {},
-    },
-    "NOMINAL_ROOT": {
-      "data": "dblbook real root account!",
-      "db": this,
-      "children": {},
-    },
+    "REAL_ROOT": new dblbook.Account(this),
+    "NOMINAL_ROOT": new dblbook.Account(this),
   };
 
-  this.subscriptionsByObject = {};
-  this.subscribers = {};
+  this.timeSeriesByAccount = {};
 
   var txn = this.idb.transaction("accounts", "readonly");
   var accounts = []
+
   txn.objectStore("accounts").openCursor().onsuccess = function(event) {
     var cursor = event.target.result;
     if (cursor) {
       accounts.push(cursor.value);
       cursor.continue();
     } else {
+      // Need to ensure that we add parent accounts before children.
       accounts = toposort(accounts);
       accounts.reverse();
 
       accounts.forEach(function(account) {
         self._doCreateAccount(account);
       });
+
+      // Better to delay callback until here?
+      // Prevents updating after page load, but is that better?
+      // It actually feels slightly faster to get a blank page and have it
+      // fill in.
+      //callback(self);
     }
   }
 
@@ -435,6 +431,13 @@ dblbook.DB.prototype._load = function() {
   */
 }
 
+/**
+ * Adds a new account to the in-memory model, but not into the database.
+ *
+ * Useful when loading accounts from the database.
+ *
+ * @param accountData Data for the account to add (to match model.proto).
+ */
 dblbook.DB.prototype._doCreateAccount = function(account) {
   if (!dblbook.accountIsValid(account)) {
     throw "invalid account";
@@ -461,20 +464,67 @@ dblbook.DB.prototype._doCreateAccount = function(account) {
 
   Object.freeze(account);
 
-  var wrapped = {
-    "db": this,
-    "data": account,
-    "balance": new dblbook.Balance(),
-    "parent": parent,
-    "children": {},
-  };
+  var accountObj = new dblbook.Account(this, account, parent);
 
-  this.accountsByGuid[account.guid] = wrapped;
-  parent.children[account.name] = wrapped;
+  this.accountsByGuid[account.guid] = accountObj;
+  parent.children[account.name] = accountObj;
 
   this._notifyChange(parent);
 
-  return wrapped;
+  return accountObj;
+}
+
+/**
+ * Checks the validity of the given transaction, including that all of the
+ * referenced accounts exist.
+ *
+ * @param txn Data for a transaction (as in model.proto).
+ */
+dblbook.DB.prototype.transactionIsValid = function(txn) {
+  if (!dblbook.transactionIsValid(txn)) {
+    return false;
+  }
+
+  for (var i in txn.entry) {
+    var entry = txn.entry[i]
+    if (!this.accountsByGuid[entry.account_guid]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Adds a transaction into the in-memory model, but not the database.
+ *
+ * Useful when loading transactions that already exist in the database.
+ *
+ * @param txn Data for a transaction (as in model.proto).
+ */
+dblbook.DB.prototype._doCreateTransaction = function(txn) {
+  if (!this.transactionIsValid(txn)) {
+    throw "invalid transaction";
+  }
+
+  if (txn.guid) {
+    if (this.transactionsByGuid[txn.guid]) {
+      throw "Tried to duplicate existing transaction.";
+    }
+  } else {
+    txn.guid = dblbook.guid();
+  }
+
+  Object.freeze(txn);
+
+  var txnObj = new dblbook.Transaction(this, txn)
+
+  this.accountsByGuid[account.guid] = txnObj;
+  parent.children[account.name] = txnObj;
+
+  this._notifyChange(parent);
+
+  return txnObj;
 }
 
 dblbook.DB.prototype.newWriteTransaction = function(stores) {
@@ -486,20 +536,24 @@ dblbook.DB.prototype.newWriteTransaction = function(stores) {
   return txn;
 }
 
+dblbook.DB.prototype.close = function(account) {
+  this.idb.close();
+}
+
 /**
- * Adds an account.  Constraints:
+ * Adds a new account.  Constraints:
  *
  * 1. account guid may or may not be set (one will be assigned if not).
  * 2. account must be valid.Account name and type should be set, but guid should be
  *    unset (the object will assign one appropriately).
  * 3. the name must not be the same as any other account with this parent.
  *
- * @param {Account} account The account to add.
+ * @param accountData Data for the account to add (to match model.proto).
  */
-dblbook.DB.prototype.createAccount = function(account) {
-  var ret = this._doCreateAccount(account);
+dblbook.DB.prototype.createAccount = function(accountData) {
+  var ret = this._doCreateAccount(accountData);
   var txn = this.newWriteTransaction(["accounts"]);
-  txn.objectStore("accounts").add(account);
+  txn.objectStore("accounts").add(accountData);
   return ret;
 }
 
@@ -533,7 +587,6 @@ dblbook.DB.prototype.updateAccount = function(account) {
   if (!newParent) {
     throw "parent account does not exist.";
   }
-
 
   if (oldParent !== newParent || wrapped.data.name != account.name) {
     if (newParent.children[account.name]) {
@@ -623,34 +676,6 @@ dblbook.DB.prototype.deleteTransaction = function(transactionGuid) {
  * The returned accounts are plain JavaScript objects with the following
  * members:
  *
- * - db: link back to the database
- * - data: the raw data for this Account (as in model.proto)
- * - balance: the account's balance as of the newest transaction
- * - parent: the parent account, or null if this is at the top level.
- * - children: an array of children, which may be empty.
- * - last: the most recent transaction for this account, or null if none.
- *
- * All the transactions ("last" and everything linked from it) are plain
- * JavaScript objects with the following members:
- *
- * - db: link back to the database
- * - data: the raw data for this Transaction (as in model.proto)
- * - accounts: an object mapping account guid to account info, only for accounts
- *   that have entries in this transaction (and their parents). Each account
- *   info object contains:
- *
- *   - description: effective description (including defaulting txn's).
- *   - date: either string postdate (for display) or integer timestamp from txn.
- *   - amount: dblbook.Balance: amount for this txn.
- *   - balance: dblbook.Balance: current cumulative balance for this account
- *     (includes all transactions for this account and all sub-accounts).
- *   - next: next transaction by time for this account (or any sub-account).
- *   - prev: prev transaction by time for this account (or any sub-account).
- *
- *   Note that next/prev are by the account entry's *post* date, not the
- *   transaction date, so the "next" transaction may not actually have a later
- *   transaction time!
- *
  * @return {Array} An array of account objects.
  */
 dblbook.DB.prototype.getRealRoot = function() {
@@ -714,4 +739,102 @@ dblbook.DB.prototype._notifyChange = function(obj) {
   callbacks.forEach(function(cb) {
     cb();
   });
+}
+
+dblbook.DB.prototype._addTimeSeries = function(timeSeries) {
+  timeSeries.values = ["$1000"];
+}
+
+dblbook.DB.prototype._addRegister = function(timeSeries) {
+}
+
+/**
+ * Class for representing an account.
+ *
+ * These properties are provided, all of which are read-only:
+ * - db: link back to the database
+ * - data: the raw data for this Account (as in model.proto)
+ * - parent: the parent account, or null if this is at the top level.
+ * - children: an array of children, which may be empty.
+ *
+ * @constructor
+ */
+dblbook.Account = function(db, data, parent) {
+  this.db = db;
+  this.data = data;
+  this.parent = parent;
+  this.children = {};
+}
+
+dblbook.Account.prototype.newTimeSeries = function() {
+  return new dblbook.TimeSeries(this.db);
+}
+
+/*
+ * All the transactions ("last" and everything linked from it) are plain
+ * JavaScript objects with the following members:
+ *
+ * - db: link back to the database
+ * - data: the raw data for this Transaction (as in model.proto)
+ * - accounts: an object mapping account guid to account info, only for accounts
+ *   that have entries in this transaction (and their parents). Each account
+ *   info object contains:
+ *
+ *   - description: effective description (including defaulting txn's).
+ *   - date: either string postdate (for display) or integer timestamp from txn.
+ *   - amount: dblbook.Balance: amount for this txn.
+ *   - balance: dblbook.Balance: current cumulative balance for this account
+ *     (includes all transactions for this account and all sub-accounts).
+ *   - next: next transaction by time for this account (or any sub-account).
+ *   - prev: prev transaction by time for this account (or any sub-account).
+ *
+ *   Note that next/prev are by the account entry's *post* date, not the
+ *   transaction date, so the "next" transaction may not actually have a later
+ *   transaction time!
+ */
+dblbook.Transaction = function(db, data) {
+  this.db = db;
+  this.data = data;
+}
+
+/**
+ * Class for representing a time-series; for example the balance of an account
+ * over time.
+ *
+ * These properties are provided, all of which are read-only:
+ * - db: link back to the database
+ * - account: link to the Account for this TimeSeries
+ * - values: array of values (either Decimal objects or Balance objects).
+ * - times: an array of times corresponding to the values.
+ *
+ * @constructor
+ */
+dblbook.TimeSeries = function(db, account) {
+  this.db = db;
+  this.account = account;
+  this.db._addTimeSeries(this);
+}
+
+/**
+ * Call when you no longer need the TimeSeries object.
+ * This will free the DB from having to update it every time anything changes.
+ */
+dblbook.TimeSeries.prototype.release = function() {
+}
+
+/**
+ * Class for representing a register; a list of transactions for an account
+ * (and possibly sub-accounts).
+ */
+dblbook.Register = function(db, account) {
+  this.db = db;
+  this.account = account;
+  this.db._addRegister(this);
+}
+
+/**
+ * Call when you no longer need the Register object.
+ * This will free the DB from having to update it every time anything changes.
+ */
+dblbook.Register.prototype.release = function() {
 }

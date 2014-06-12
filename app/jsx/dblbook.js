@@ -143,8 +143,15 @@ var AccountList = React.createClass({
 var Account = React.createClass({
   mixins: [DblbookSubscribeMixin],
 
+  // TODO: componentWillReceiveProps?
   componentWillMount: function() {
+    this.balance = this.props.account.newTimeSeries();
     this.subscribe(this.props.account);
+    this.subscribe(this.balance);
+  },
+
+  componentWillUnmount: function() {
+    this.balance.release();
   },
 
   renderTriangle: function() {
@@ -159,6 +166,11 @@ var Account = React.createClass({
     return <i className={cls} onClick={this.props.ontoggle} />;
   },
 
+  renderBalance: function() {
+    var str = this.balance.values[0];
+    return <span>{str}</span>;
+  },
+
   render: function() {
     return <tr>
         <td>
@@ -167,7 +179,7 @@ var Account = React.createClass({
           &nbsp;&nbsp;&nbsp;
           <a href="#">{this.props.account.data.name}</a>
         </td>
-        <td>{"$1000"}&nbsp;</td>
+        <td>{this.renderBalance()}&nbsp;</td>
       </tr>;
   }
 });

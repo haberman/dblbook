@@ -12,7 +12,7 @@ function dbtest(name, func) {
       dblbook.openDB(function(db) {
         ok(db instanceof dblbook.DB, "created object is DB");
         func(db);
-        db.idb.close();
+        db.close();
         start();
       });
     });

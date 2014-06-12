@@ -17,6 +17,17 @@ function mapType(type) {
   }
 }
 
+function mapCommodity(commodity) {
+  var cmdty="http://www.gnucash.org/XML/cmdty";
+  var space = getXmlText(commodity, cmdty, "space");
+  var id = getXmlText(commodity, cmdty, "id");
+  if (space == "ISO4217") {
+    return id;
+  } else {
+    return space + ":" + id;
+  }
+}
+
 function importGnucash2(xmlString, db, rootForNew) {
   // Namespaces.
   var gnc = "http://www.gnucash.org/XML/gnc";
@@ -32,6 +43,7 @@ function importGnucash2(xmlString, db, rootForNew) {
       guid: getXmlText(gnucashAccount, act, "id"),
       name: getXmlText(gnucashAccount, act, "name"),
       type: mapType(getXmlText(gnucashAccount, act, "type")),
+      commodity_guid: mapCommodity(gnucashAccount, act, "commodity"),
     }
 
     // We count on seeing the parent first.
