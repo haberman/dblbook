@@ -13,22 +13,18 @@ dblbook.guid = function() {
   });
 }
 
-dblbook.appendNested = function(base, key, val) {
-  if (!base[key]) {
-    base[key] = []
+dblbook.appendNested = function(base, key1, key2, val) {
+  if (!base.get(key1)) {
+    base.set(key1, new Map());
   }
-  base[key].push(val);
+  base.get(key1).set(key2, val);
 }
 
-dblbook.removeNested = function(base, key, remove) {
-  if (!base[key]) {
-    return;
-  }
-
-  base[key] = base[key].filter(function(elem) { return !remove(elem) });
-
-  if (base[key].length == 0) {
-    delete base[key];
+dblbook.removeNested = function(base, key1, key2) {
+  var sub = base.get(key1);
+  sub.delete(key2);
+  if (sub.size == 0) {
+    base.delete(key1);
   }
 }
 
@@ -389,7 +385,8 @@ dblbook.DB = function(idb, callback) {
     "NOMINAL_ROOT": new dblbook.Account(this),
   };
 
-  this.timeSeriesByAccount = {};
+  this.subscriptionsByObj = new Map();
+  this.subscriptionsBySubscriber = new Map();
 
   var txn = this.idb.transaction("accounts", "readonly");
   var accounts = []
@@ -691,54 +688,28 @@ dblbook.DB.prototype.getNominalRoot = function() {
  * Overwrites any existing callback for this obj/subscriber pair.
  */
 dblbook.DB.prototype.subscribe = function(subscriber, obj, cb) {
-  // Adding properties to "subscriber" and "obj" is gross.
-  // But JavaScript doesn't let you use objects as object keys with
-  // identity (===) semantics, so this is our least-bad alternative.
-  this.unsubscribe(subscriber, obj);
-  dblbook.appendNested(obj, "__subscribers", [subscriber, cb]);
-  dblbook.appendNested(subscriber, "__subscribed_to", obj);
+  dblbook.appendNested(this.subscriptionsByObj, obj, subscriber, cb);
+  dblbook.appendNested(this.subscriptionsBySubscriber, subscriber, obj, true);
 }
 
 /**
  * Unsubscribes to whatever we subscribed to as this subscriber.
  */
-dblbook.DB.prototype.unsubscribe = function(subscriber, obj) {
-  var objs;
-  if (obj) {
-    objs = [obj];
-  } else {
-    objs = subscriber.__subscribed_to || [];
-  }
-
-  objs.forEach(function(thisObj) {
-    dblbook.removeNested(thisObj, "__subscribers", function(pair) {
-      return subscriber === pair[0];
-    });
+dblbook.DB.prototype.unsubscribe = function(subscriber) {
+  var self = this;
+  this.subscriptionsBySubscriber.get(subscriber).forEach(function(val, obj) {
+    console.log(obj);
+    dblbook.removeNested(self.subscriptionsByObj, obj, subscriber);
   });
-
-  dblbook.removeNested(subscriber, "__subscribed_to", function(thisObj) {
-    if (!obj) {
-      // Remove all.
-      return true;
-    } else if (obj === thisObj) {
-      // Remove because this object matches.
-      return true;
-    }
-    return false;
-  });
+  this.subscriptionsBySubscriber.delete(subscriber);
 }
 
 dblbook.DB.prototype._notifyChange = function(obj) {
-  var subscriptions = obj.__subscribers || [];
-  var callbacks = [];
+  var subscribers = this.subscriptionsByObj.get(obj);
 
-  subscriptions.forEach(function(pair) {
-    callbacks.push(pair[1]);
-  });
-
-  callbacks.forEach(function(cb) {
-    cb();
-  });
+  if (subscribers) {
+    subscribers.forEach(function(cb) { cb(); });
+  }
 }
 
 dblbook.DB.prototype._addTimeSeries = function(timeSeries) {

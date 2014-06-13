@@ -4,7 +4,9 @@
 // https://github.com/paulmillr/es6-shim/
 
 (function(undefined) {
-  'use strict';
+  // Removed so we can get the global object without eval()
+  // (see getGlobal below).
+  // 'use strict';
 
   var isCallableWithoutNew = function(func) {
     try { func(); }
@@ -49,7 +51,9 @@
   };
 
   /*jshint evil: true */
-  var getGlobal = new Function('return this;');
+  // Doesn't work with the Chrome App content security policy.
+  // var getGlobal = new Function('return this;');
+  var getGlobal = function () { return this; }
   /*jshint evil: false */
 
   var main = function() {
