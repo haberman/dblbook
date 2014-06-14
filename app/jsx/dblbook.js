@@ -4,10 +4,6 @@ function repeat(str, times) {
   return new Array(times + 1).join(str);
 }
 
-function isEmptyObject(obj) {
-  return Object.keys(obj).length == 0;
-}
-
 var nbsp = String.fromCharCode(160)
 
 /**
@@ -57,7 +53,7 @@ var AccountPage = React.createClass({
     </div>;
 
     this.subscribe(this.props.db.getRealRoot());
-    if (!isEmptyObject(this.props.db.getRealRoot().children)) {
+    if (this.props.db.getRealRoot().children.size == 0) {
       uploadGnucash = null;
     }
 
@@ -90,15 +86,7 @@ var AccountList = React.createClass({
   },
 
   renderChildren: function(account, depth, children) {
-    var childNames = [];
-    for (var childName in account.children) {
-      childNames.push(childName);
-    }
-
-    childNames.sort();
-
-    childNames.forEach(function(name) {
-      var child = account.children[name];
+    iterate(account.children.entries(), function(name, child) {
       this.subscribe(child);
       var expanded = this.state[child.data.guid];
       children.push(
@@ -157,7 +145,7 @@ var Account = React.createClass({
   renderTriangle: function() {
     // We generate a hidden one so the spacing is right for leaf accounts.
     var cls = "fa fa-play unselectable";
-    if (isEmptyObject(this.props.account.children)) {
+    if (this.props.account.children.size == 0) {
       cls += " myhide";
     }
     if (this.props.expanded) {
@@ -184,7 +172,7 @@ var Account = React.createClass({
   }
 });
 
-dblbook.openDB(function(db) {
+dblbook.DB.open(function(db) {
   document.db = db;
   React.renderComponent(<AccountPage db={db} />,
                         document.getElementById("content"));

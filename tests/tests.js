@@ -1,22 +1,29 @@
 // Makes the database forget that one has been previously constructed, to work
 // around the code that enforces singleton.  This is necessary for tests where
 // we want to verify that the DB was persisted correctly.
-function forget() { dblbook.DB.created = undefined; }
+function forget() { dblbook.DB.singleton = undefined; }
+
+function runTestWithDb(func) {
+  stop();
+  dblbook.DB.open(function(db) {
+    ok(db instanceof dblbook.DB, "created object is DB");
+    func(db);
+    db.close();
+    start();
+  });
+}
 
 function dbtest(name, func) {
   test(name, function() {
+    stop();
+
     // First delete the entire indexeddb.
     dblbook.DB.delete(function() {
       // Next open a fresh DB from scratch.
       forget();
-      dblbook.DB.open(function(db) {
-        ok(db instanceof dblbook.DB, "created object is DB");
-        func(db);
-        db.close();
-        start();
-      });
+      runTestWithDb(func);
+      start();
     });
-    stop();
   });
 }
 
@@ -99,6 +106,9 @@ dbtest("CRUD account", function(db) {
   throws(function() {
     db.createAccount({"name":"Test", "type": "ASSET"})
   }, "can't create account with duplicate name");
+
+  ok(db.createAccount({"guid": "EXPLICIT GUID", "name": "YO", "type": "ASSET"}),
+     "can create an account with an explicit GUID set.");
 });
 
 dbtest("Change notifications", function(db) {
@@ -172,3 +182,28 @@ dbtest("Change notifications", function(db) {
   equal(notified2, 4);
   equal(notified, 2);
 });
+
+dbtest("restore data from IDB", function(db) {
+  // Create some data.
+  var account1 = db.createAccount({"name":"Test", "type": "ASSET"});
+  ok(account1, "create account 1");
+  ok(db.createAccount({"name":"Test2", "type": "ASSET"}), "create account 2");
+  ok(db.createAccount({"name":"Sub", "parent_guid": account1.data.guid, "type": "ASSET"}),
+     "create sub account");
+
+  forget();
+
+  runTestWithDb(function(db2) {
+    ok(db2 instanceof dblbook.DB, "created object is DB");
+    var root = db2.getRealRoot();
+    equal(2, root.children.size);
+
+    var a1 = root.children.get("Test");
+    var a2 = root.children.get("Test2");
+    var sub = a1.children.get("Sub");
+
+    ok(a1);
+    ok(a2);
+    ok(sub);
+  });
+})

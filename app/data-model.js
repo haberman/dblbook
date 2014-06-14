@@ -39,6 +39,26 @@ function iterToArray(iter) {
   }
 }
 
+// Iterates over a ES6-style iterator.
+function iterate(iter, func, funcThis) {
+  while (1) {
+    var v = iter.next();
+    if (v.done) {
+      return;
+    }
+
+    var val = v.value;
+
+    if (val instanceof Array) {
+      // iterate(map.entries(), function(key, val) {});
+      func.apply(funcThis, val);
+    } else {
+      // iterate(map.values(), function(val) {});
+      func.call(funcThis, val);
+    }
+  }
+}
+
 function toposort(nodes) {
   var cursor = nodes.length;
   var sorted = new Array(cursor);
@@ -298,30 +318,12 @@ dblbook.DB = function(idb, callback) {
       accounts.reverse();
 
       accounts.forEach(function(account) {
-        new dblbook.Account(this, account);
+        var account = new dblbook.Account(self, account);
       });
 
-      // Better to delay callback until here?
-      // Prevents updating after page load, but is that better?
-      // It actually feels slightly faster to get a blank page and have it
-      // fill in.
-      //callback(self);
+      callback(self);
     }
   }
-
-  /*
-
-  var txn = this.db.transaction("transactions", "readonly");
-  var store = tx.objectStore("transactions");
-  var index = store.index("date_order");
-
-  var request = index.openCursor().onsuccess = function() {
-    var cursor = request.result;
-    if (cursor) {
-
-    }
-  }
-  */
 }
 
 /**
@@ -347,19 +349,25 @@ dblbook.DB.open = function(callback) {
   request.onsuccess = function() {
     var idb = request.result;
 
-    if (dblbook.DB.created) {
+    if (dblbook.DB.singleton) {
       callback(null, "Only one DB object allowed");
       idb.close();
     } else {
-      dblbook.DB.created = true;
-      var db = new dblbook.DB(idb, callback);
-      callback(db);
+      dblbook.DB.singleton = new dblbook.DB(idb, callback);
     }
   }
 
   request.onerror = function() {
     callback(null, "error opening IndexedDB");
   }
+}
+
+/**
+ * Closes the DB object.  After this returns, you may not call any mutating
+ * methods.
+ */
+dblbook.DB.prototype.close = function(account) {
+  this.idb.close();
 }
 
 /**
@@ -397,17 +405,31 @@ dblbook.DB.prototype.transactionIsValid = function(txn) {
   return true;
 }
 
-dblbook.DB.prototype._newWriteTransaction = function(stores) {
-  var txn = this.idb.transaction(stores, "readwrite");
-  txn.onerror = function(event) {
-    console.log("Whoa, did not see that coming.", event);
-    alert("Transaction failure!");
-  }
-  return txn;
-}
+/**
+ * Internal-only method that returns a indexedDB transaction for writing to
+ * the given stores.
+ *
+ * @return {IDBTransaction} An indexedDB transaction.
+ */
+dblbook.DB.prototype._getWriteTransaction = function(stores) {
+  // TODO: take "stores" into account.
 
-dblbook.DB.prototype.close = function(account) {
-  this.idb.close();
+  var self = this;
+
+  if (!this.txn) {
+    this.txn = this.idb.transaction(stores, "readwrite");
+
+    this.txn.onerror = function(event) {
+      console.log("Whoa, did not see that coming.", event);
+      alert("Transaction failure!");
+    }
+
+    this.txn.onsuccess = function(event) {
+      self.txn = null;
+    }
+  }
+
+  return this.txn;
 }
 
 /**
@@ -422,7 +444,7 @@ dblbook.DB.prototype.close = function(account) {
  */
 dblbook.DB.prototype.createAccount = function(accountData) {
   var ret = new dblbook.Account(this, accountData);
-  var txn = this._newWriteTransaction(["accounts"]);
+  var txn = this._getWriteTransaction(["accounts"]);
   txn.objectStore("accounts").add(accountData);
   return ret;
 }
@@ -437,35 +459,27 @@ dblbook.DB.prototype.createTransaction = function(transaction) {
 }
 
 /**
- * Updates an existing transaction.  Transaction guid must be set, and the
- * transaction must be valid.  This will completely overwrite the previous
- * value of this transaction.
+ * Returns the root of the real account tree.
  *
- * @param {Transaction} transaction The new value for this transaction.
- */
-dblbook.DB.prototype.updateTransaction = function(transaction) {
-}
-
-/**
- * Deletes an existing transaction.
+ * The returned object is a dblbook.Account object, but it has no "data"
+ * member.  You can retrieve its children and get a TimeSeries or Register
+ * reader for it.  But you cannot update/delete it or give it any transactions.
  *
- * @param {string} transactionGuid The guid of the transaction to delete.
- */
-dblbook.DB.prototype.deleteTransaction = function(transactionGuid) {
-}
-
-/**
- * Returns a list of top-level accounts.
- *
- * The returned accounts are plain JavaScript objects with the following
- * members:
- *
- * @return {Array} An array of account objects.
+ * @return {dblbook.Account} The root of the real account tree.
  */
 dblbook.DB.prototype.getRealRoot = function() {
   return this.accountsByGuid.get("REAL_ROOT");
 }
 
+/**
+ * Returns the root of the nominal account tree.
+ *
+ * The returned object is a dblbook.Account object, but it has no "data"
+ * member.  You can retrieve its children and get a TimeSeries or Register
+ * reader for it.  But you cannot update/delete it or give it any transactions.
+ *
+ * @return {dblbook.Account} The root of the nominal account tree.
+ */
 dblbook.DB.prototype.getNominalRoot = function() {
   return this.accountsByGuid.get("NOMINAL_ROOT");
 }
@@ -503,13 +517,6 @@ dblbook.DB.prototype._notifyChange = function(obj) {
   if (subscribers) {
     subscribers.forEach(function(cb) { cb(); });
   }
-}
-
-dblbook.DB.prototype._addTimeSeries = function(timeSeries) {
-  timeSeries.values = ["$1000"];
-}
-
-dblbook.DB.prototype._addRegister = function(timeSeries) {
 }
 
 /**
@@ -550,7 +557,7 @@ dblbook.Account = function(db, data) {
   }
 
   if (data.guid) {
-    if (this.getAccountByGuid(data.guid)) {
+    if (this.db.getAccountByGuid(data.guid)) {
       throw "Tried to duplicate existing account";
     }
   } else {
@@ -625,7 +632,7 @@ dblbook.Account.prototype.update = function(newData) {
 
   this.data = newData;
 
-  var txn = this.db._newWriteTransaction(["accounts"]);
+  var txn = this.db._getWriteTransaction(["accounts"]);
   txn.objectStore("accounts").put(newData);
 }
 
@@ -642,18 +649,22 @@ dblbook.Account.prototype.delete = function() {
   if (this.parent) {
     this.parent.children.delete(this.data.name);
     this.db._notifyChange(this.parent);
+    // TODO:
     // Should we notify the account itself?
     // Then any view that depends on it could just
     // redirect somewhere else?
   }
 
   this.db.accountsByGuid.delete(this.data.guid);
-  var txn = this.db._newWriteTransaction(["accounts"]);
+  var txn = this.db._getWriteTransaction(["accounts"]);
   txn.objectStore("accounts").delete(this.data.guid);
 }
 
 dblbook.Account.prototype.newTimeSeries = function() {
-  return new dblbook.TimeSeries(this.db);
+  return {
+    db: this.db,
+    "values": ["$1000"]
+  };
 }
 
 /*
@@ -761,6 +772,23 @@ dblbook.Transaction.isValid = function(txnData) {
   return true;
 }
 
+/**
+ * Updates an existing transaction.  Transaction guid must be set, and the
+ * transaction must be valid.  This will completely overwrite the previous
+ * value of this transaction.
+ *
+ * @param {Transaction} transaction The new value for this transaction.
+ */
+dblbook.Transaction.prototype.update = function(transactionData) {
+}
+
+/**
+ * Deletes an existing transaction.
+ *
+ * @param {string} transactionGuid The guid of the transaction to delete.
+ */
+dblbook.Transaction.prototype.delete = function() {
+}
 
 /**
  * A Reader is an iterable object that is kept up-to-date whenever the DB
