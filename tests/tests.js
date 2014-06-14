@@ -6,10 +6,10 @@ function forget() { dblbook.DB.created = undefined; }
 function dbtest(name, func) {
   test(name, function() {
     // First delete the entire indexeddb.
-    dblbook.obliterateDB(function() {
+    dblbook.DB.delete(function() {
       // Next open a fresh DB from scratch.
       forget();
-      dblbook.openDB(function(db) {
+      dblbook.DB.open(function(db) {
         ok(db instanceof dblbook.DB, "created object is DB");
         func(db);
         db.close();
@@ -20,14 +20,10 @@ function dbtest(name, func) {
   });
 }
 
-function numChildren(account) {
-  return Object.keys(account.children).length;
-}
-
 test("transaction validity", function() {
-  ok(!dblbook.transactionIsValid({}), "invalid txn 1");
+  ok(!dblbook.Transaction.isValid({}), "invalid txn 1");
 
-  ok(dblbook.transactionIsValid({
+  ok(dblbook.Transaction.isValid({
     "timestamp": 12345,
     "description": "Foo Description",
     "entry": [
@@ -40,7 +36,7 @@ test("transaction validity", function() {
     ]
   }), "valid txn 1");
 
-  ok(!dblbook.transactionIsValid({
+  ok(!dblbook.Transaction.isValid({
     "timestamp": 12345,
     "description": "Foo Description",
     "entry": [
@@ -55,17 +51,17 @@ test("transaction validity", function() {
 });
 
 test("account validity", function() {
-  ok(!dblbook.accountIsValid({}), "invalid account 1");
-  ok(dblbook.accountIsValid({"name":"Test", "type": "ASSET"}), "valid account 1");
+  ok(!dblbook.Account.isValid({}), "invalid account 1");
+  ok(dblbook.Account.isValid({"name":"Test", "type": "ASSET"}), "valid account 1");
 });
 
 dbtest("empty DB", function(db) {
-  ok(numChildren(db.getRealRoot()) == 0, "empty db has no accounts");
-  ok(numChildren(db.getNominalRoot()) == 0, "empty db has no accounts");
+  ok(db.getRealRoot().children.size == 0, "empty db has no accounts");
+  ok(db.getNominalRoot().children.size == 0, "empty db has no accounts");
 });
 
 dbtest("multiple DBs not allowed", function() {
-  dblbook.openDB(function(db, msg) {
+  dblbook.DB.open(function(db, msg) {
     ok(db == null);
     start();
   });
@@ -74,35 +70,31 @@ dbtest("multiple DBs not allowed", function() {
 
 dbtest("CRUD account", function(db) {
   throws(function() {
-    db.updateAccount({"name":"Test", "guid": "not-exists"})
-  }, "can't update a non-existent account");
-
-  throws(function() {
     db.createAccount({"name":"Test", "parent_guid": "not-exists", "type": "ASSET"})
   }, "can't create an account if parent doesn't exist");
 
-  ok(numChildren(db.getRealRoot()) == 0);
+  ok(db.getRealRoot().children.size == 0);
   ok(db.createAccount({"name":"Test", "type": "ASSET"}), "create account 1");
-  ok(numChildren(db.getRealRoot()) == 1, "now there is one account");
-  var account = db.getRealRoot().children["Test"];
+  ok(db.getRealRoot().children.size == 1, "now there is one account");
+  var account = db.getRealRoot().children.get("Test");
   ok(account.data.guid, "created account has a guid");
   ok(account.data.name == "Test", "created account has correct name");
   ok(account.db === db, "created account has correct db");
   ok(account.parent === db.getRealRoot(), "created account top as parent");
-  ok(numChildren(account) == 0, "created account has no children");
+  ok(account.children.size == 0, "created account has no children");
 
   var account1_guid = account.data.guid;
 
   var sub = db.createAccount({"name":"Sub", "parent_guid":account1_guid, "type": "ASSET"});
   ok(sub, "create account 2");
 
-  ok(numChildren(account) == 1, "now Test account has sub-account");
+  ok(account.children.size == 1, "now Test account has sub-account");
 
   // Move account to the top level.
-  ok(db.updateAccount({"guid":sub.data.guid, "name":"Sub", "type": "ASSET"}));
+  sub.update({"name":"Sub", "type": "ASSET"});
 
-  ok(numChildren(db.getRealRoot()) == 2, "top-level now has two accounts");
-  ok(numChildren(account) == 0, "Test no longer has sub-account");
+  ok(db.getRealRoot().children.size == 2, "top-level now has two accounts");
+  ok(account.children.size == 0, "Test no longer has sub-account");
 
   throws(function() {
     db.createAccount({"name":"Test", "type": "ASSET"})
@@ -136,7 +128,7 @@ dbtest("Change notifications", function(db) {
   equal(notified2, 1, "Adding an account (4) notifies second subscription");
 
   var notified3 = 0;
-  var testAccount = db.getRealRoot().children["Test"];
+  var testAccount = db.getRealRoot().children.get("Test");
   ok(testAccount);
   var testAccountGuid = testAccount.data.guid;
   db.subscribe(this, testAccount, function() {
@@ -144,7 +136,7 @@ dbtest("Change notifications", function(db) {
   });
 
   db.createAccount({"name":"Sub", "parent_guid":testAccountGuid, "type": "ASSET"});
-  var sub = testAccount.children["Sub"];
+  var sub = testAccount.children.get("Sub");
   ok(sub);
   equal(notified3, 1);
   equal(notified2, 1);
@@ -167,8 +159,7 @@ dbtest("Change notifications", function(db) {
   equal(notified2, 3);
   equal(notified, 2);
 
-  ok(db.updateAccount({"guid": sub.data.guid, "name": "WasSub", "type": "ASSET"}),
-     "reparented account from Test to root");
+  sub.update({"name": "WasSub", "type": "ASSET"})
   equal(notified4, 2);
   equal(notified3, 2);
   equal(notified2, 4);
