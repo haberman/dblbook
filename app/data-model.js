@@ -106,6 +106,99 @@ function rootForType(type) {
   }
 }
 
+/**
+ * An ES6-compatible iterator for SortedMap.
+ */
+dblbook.SortedMapIterator = function(rbIter) {
+  this.rbIter = rbIter;
+  this.done = false;
+}
+
+dblbook.SortedMapIterator.prototype.next = function() {
+  var item;
+  if (this.done || (item = this.rbIter.next()) == null) {
+    this.done = true;
+    return {"done": true};
+  } else {
+    return {
+      "value": item,
+      "done": false,
+    }
+  }
+}
+
+/**
+ * Sorted string -> value map.
+ */
+dblbook.SortedMap = function() {
+  this.tree = new RBTree(dblbook.SortedMap._compare);
+
+  Object.defineProperty(this, "size", {
+    "get": function() { return this.tree.size; }
+  });
+}
+
+dblbook.SortedMap._compare = function(e1, e2) {
+  var k1 = e1[0];
+  var k2 = e2[0];
+  if (k1 < k2) {
+    return -1;
+  } else if (k2 < k1) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+/**
+ * Sets the given key/value pair in the map, throwing an error if this key
+ * is already in the map.
+ */
+dblbook.SortedMap.prototype.add = function(key, val) {
+  var ok = this.tree.insert([key, val]);
+  if (!ok) {
+    throw "Key was already present.";
+  }
+}
+
+/**
+ * Sets the given key/value pair in the map, overwriting any previous value
+ * for "key".
+ */
+dblbook.SortedMap.prototype.set = function(key, val) {
+  this.tree.remove([key, null]);
+  this.tree.insert([key, val]);
+}
+
+/**
+ * Removes the given key from the map, if present.
+ * for "key".
+ */
+dblbook.SortedMap.prototype.delete = function(key) {
+  this.tree.remove([key, null]);
+}
+
+/**
+ * Returns true if the given key is in the map.
+ */
+dblbook.SortedMap.prototype.has = function(key) {
+  return this.tree.find([key, null]) != null;
+}
+
+/**
+ * Returns the value for this key if it exists, otherwise null.
+ */
+dblbook.SortedMap.prototype.get = function(key) {
+  var val = this.tree.find([key, null]);
+  return val ? val[1] : null;
+}
+
+/**
+ * Returns an iterator over the map's entries, in key order.
+ */
+dblbook.SortedMap.prototype.iterator = function() {
+  return new dblbook.SortedMapIterator(this.tree.iterator());
+}
 
 /**
  * Class for representing decimal numbers losslessly (unlike binary floating
@@ -534,7 +627,7 @@ dblbook.Account = function(db, data) {
   this.db = db;
   this.data = data;
   this.parent = null;
-  this.children = new Map();
+  this.children = new dblbook.SortedMap();
 
   if (!data) {
     // Root account.

@@ -86,7 +86,7 @@ var AccountList = React.createClass({
   },
 
   renderChildren: function(account, depth, children) {
-    iterate(account.children.entries(), function(name, child) {
+    iterate(account.children.iterator(), function(name, child) {
       this.subscribe(child);
       var expanded = this.state[child.data.guid];
       children.push(
