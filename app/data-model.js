@@ -370,6 +370,41 @@ dblbook.isArray = function(val) {
 }
 
 /**
+ * Observable interface / base class.
+ *
+ * Objects that inherit from this (dblbook.Account and dblbook.Reader) allow
+ * you to receive notification when the object changes.
+ *
+ */
+dblbook.Observable = function() {
+  this.subscribers = new Map();
+}
+
+/**
+ * Registers this callback, which will be called whenever this object
+ * changes.  Any callback previously registered for this subcriber will
+ * be replaced.
+ */
+dblbook.Observable.prototype.subscribe = function(subscriber, callback) {
+  this.subscribers.set(subscriber, callback);
+}
+
+/**
+ * Unregisters any previously registered callback for this subscriber.
+ */
+dblbook.Observable.prototype.unsubscribe = function(subscriber) {
+  this.subscribers.delete(subscriber);
+}
+
+/**
+ * Internal-only function for calling all subscribers that the object has
+ * changed.
+ */
+dblbook.Observable.prototype._notifyChange = function() {
+  iterate(this.subscribers.values(), function(cb) { cb(); });
+}
+
+/**
  * The top-level "database" object that contains all accounts and transactions
  * for some person or organization.
  *
@@ -397,6 +432,22 @@ dblbook.DB = function(idb, callback) {
   this.subscriptionsByObj = new Map();
   this.subscriptionsBySubscriber = new Map();
 
+  var i = 2;
+  var barrier = function() {
+    if (--i == 0) {
+      callback(self);
+    }
+  }
+
+  this._loadAccounts(barrier);
+  this._loadTransactions(barrier);
+}
+
+/**
+ * Internal-only method to load accounts; calls callback when finished.
+ */
+dblbook.DB.prototype._loadAccounts = function(callback) {
+  var self = this;
   var txn = this.idb.transaction("accounts", "readonly");
   var accounts = []
 
@@ -414,10 +465,46 @@ dblbook.DB = function(idb, callback) {
         var account = new dblbook.Account(self, account);
       });
 
-      callback(self);
+      callback();
     }
   }
 }
+
+/**
+ * Internal-only method to load transactions; calls callback when finished.
+ * Right now we immediately and unconditionally load all transactions; we will
+ * want to replace this with lazy loading.
+ */
+dblbook.DB.prototype._loadTransactions = function(callback) {
+  callback();
+  return;
+  var self = this;
+  var txn = this.idb.transaction("transactions", "readonly");
+  var accounts = []
+
+  txn.objectStore("accounts").openCursor().onsuccess = function(event) {
+    var cursor = event.target.result;
+    if (cursor) {
+      accounts.push(cursor.value);
+      cursor.continue();
+    } else {
+      // Need to ensure that we add parent accounts before children.
+      accounts = toposort(accounts);
+      accounts.reverse();
+
+      accounts.forEach(function(account) {
+        var account = new dblbook.Account(self, account);
+      });
+
+      callback();
+    }
+  }
+}
+
+
+/**
+ * Internal-only method to load transactions; calls callback when finished.
+ */
 
 /**
  * Opens the database, calling callback(db) when it is opened successfully.
@@ -585,34 +672,6 @@ dblbook.DB.prototype.getAccountByGuid = function(guid) {
 }
 
 /**
- * Subscribes to changes for this object.
- * Overwrites any existing callback for this obj/subscriber pair.
- */
-dblbook.DB.prototype.subscribe = function(subscriber, obj, cb) {
-  dblbook.appendNested(this.subscriptionsByObj, obj, subscriber, cb);
-  dblbook.appendNested(this.subscriptionsBySubscriber, subscriber, obj, true);
-}
-
-/**
- * Unsubscribes to whatever we subscribed to as this subscriber.
- */
-dblbook.DB.prototype.unsubscribe = function(subscriber) {
-  var self = this;
-  this.subscriptionsBySubscriber.get(subscriber).forEach(function(val, obj) {
-    dblbook.removeNested(self.subscriptionsByObj, obj, subscriber);
-  });
-  this.subscriptionsBySubscriber.delete(subscriber);
-}
-
-dblbook.DB.prototype._notifyChange = function(obj) {
-  var subscribers = this.subscriptionsByObj.get(obj);
-
-  if (subscribers) {
-    subscribers.forEach(function(cb) { cb(); });
-  }
-}
-
-/**
  * Class for representing an account.
  *
  * These properties are provided, all of which are read-only:
@@ -624,6 +683,8 @@ dblbook.DB.prototype._notifyChange = function(obj) {
  * @constructor
  */
 dblbook.Account = function(db, data) {
+  dblbook.Observable.call(this);
+
   this.db = db;
   this.data = data;
   this.parent = null;
@@ -661,8 +722,12 @@ dblbook.Account = function(db, data) {
 
   this.parent.children.set(data.name, this);
   this.db.accountsByGuid.set(data.guid, this);
-  this.db._notifyChange(this.parent);
+  this.parent._notifyChange();
 }
+
+// Account extends Observable.
+dblbook.Account.prototype = Object.create(dblbook.Observable.prototype);
+dblbook.Account.prototype.constructor = dblbook.Account;
 
 /**
  * Returns true if the given account is valid in isolation.
@@ -715,8 +780,8 @@ dblbook.Account.prototype.update = function(newData) {
     oldParent.children.delete(this.data.name);
     newParent.children.set(newData.name, this);
 
-    this.db._notifyChange(oldParent);
-    this.db._notifyChange(newParent);
+    oldParent._notifyChange();
+    newParent._notifyChange();
 
     this.parent = newParent;
   }
@@ -741,7 +806,7 @@ dblbook.Account.prototype.delete = function() {
 
   if (this.parent) {
     this.parent.children.delete(this.data.name);
-    this.db._notifyChange(this.parent);
+    this.parent._notifyChange();
     // TODO:
     // Should we notify the account itself?
     // Then any view that depends on it could just
@@ -753,34 +818,67 @@ dblbook.Account.prototype.delete = function() {
   txn.objectStore("accounts").delete(this.data.guid);
 }
 
-dblbook.Account.prototype.newTimeSeries = function() {
-  return {
-    db: this.db,
-    "values": ["$1000"]
-  };
+/**
+ * Returns a new Reader that vends a sequence of balances for this account
+ * at different points in time.  Each iterated item is a pair of:
+ *
+ *   [Date, dblbook.Balance]
+ *
+ * Options (and their defaults) are: {
+ *   // How many sample points should be part of the sequence.
+ *   "count": 1,
+ *
+ *   // When the last point should be.
+ *   "end": new Date(),
+ *
+ *   // When true, amounts indicate the *change* since the beginning of the
+ *   // period, not the point-in-time balance of the account.
+ *   //
+ *   // Note that this has no effect when frequency = "FOREVER", since in that
+ *   // case the delta and absolute balances are the same.
+ *   "delta": false,
+ *
+ *   // Frequency of points.
+ *   // Valid values are: "DAY", "WEEK", "MONTH", "QUARTER", "YEAR", "FOREVER".
+ *   // "FOREVER" is only valid for count = 1.
+ *   "frequency": "FOREVER",
+ *
+ *   // When true, amounts include transactions for all child accounts.
+ *   "includeChildren": true,
+ */
+dblbook.Account.prototype.newBalanceReader = function(options) {
+  return new dblbook.Reader();
 }
 
-/*
- * All the transactions ("last" and everything linked from it) are plain
- * JavaScript objects with the following members:
+/**
+ * Returns a new Reader that vends a sequence of Transactions for this
+ * account.  The iterated items are: dblbook.Transaction objects.
  *
+ * Options (and their defaults) are: {
+ *   // How many transactions should be part of the sequence.
+ *   "count": 20,
+ *
+ *   // The first returned transaction will be the one directly at or before
+ *   // this date.
+ *   "end": new Date(),
+ *
+ *   // When true, list includes transactions for all child accounts.
+ *   "includeChildren": true,
+ * }
+ *
+ * Note: if this is a *leaf* account, the ordering will reflect the post date
+ * if any (for the entry in this account).  For all non-leaf accounts, the
+ * ordering reflects the transaction's time.
+ */
+dblbook.Account.prototype.newTransactionReader = function(options) {
+}
+
+/**
+ * dblbook.Transaction: object representing a transaction in the database.
+ *
+ * Contains these properties:
  * - db: link back to the database
  * - data: the raw data for this Transaction (as in model.proto)
- * - accounts: an object mapping account guid to account info, only for accounts
- *   that have entries in this transaction (and their parents). Each account
- *   info object contains:
- *
- *   - description: effective description (including defaulting txn's).
- *   - date: either string postdate (for display) or integer timestamp from txn.
- *   - amount: dblbook.Balance: amount for this txn.
- *   - balance: dblbook.Balance: current cumulative balance for this account
- *     (includes all transactions for this account and all sub-accounts).
- *   - next: next transaction by time for this account (or any sub-account).
- *   - prev: prev transaction by time for this account (or any sub-account).
- *
- *   Note that next/prev are by the account entry's *post* date, not the
- *   transaction date, so the "next" transaction may not actually have a later
- *   transaction time!
  */
 dblbook.Transaction = function(db, data) {
   this.db = db;
@@ -866,6 +964,19 @@ dblbook.Transaction.isValid = function(txnData) {
 }
 
 /**
+ * Returns info about this transaction pertaining to the given account.
+ * If this account does not have an entry in this transaction, returns null.
+ *
+ *  - description: effective description (including defaulting txn's).
+ *  - date: either string postdate (for display) or integer timestamp from txn.
+ *  - amount: dblbook.Decimal: amount for this txn.
+ *  - balance: dblbook.Balance: current cumulative balance for this account
+ *    (includes all transactions for this account and all sub-accounts).
+ */
+dblbook.Transaction.prototype.getAccountInfo = function(accountGuid) {
+}
+
+/**
  * Updates an existing transaction.  Transaction guid must be set, and the
  * transaction must be valid.  This will completely overwrite the previous
  * value of this transaction.
@@ -904,4 +1015,41 @@ dblbook.Transaction.prototype.delete = function() {
  * @constructor
  */
 dblbook.Reader = function() {
+  dblbook.Observable.call(this);
+}
+
+// Reader extends Observable.
+dblbook.Reader.prototype = Object.create(dblbook.Observable.prototype);
+dblbook.Reader.prototype.constructor = dblbook.Reader;
+
+dblbook.Reader.prototype.iterator = function() {
+  return new dblbook.ReaderIterator();
+}
+
+/**
+ * The Subscription protocol (see above).
+ */
+dblbook.Reader.prototype.subscribe = function(subscriber, callback) {
+}
+
+dblbook.Reader.prototype.unsubscribe = function(subscriber) {
+}
+
+dblbook.ReaderIterator = function() {
+  this.values = ["$1000"];
+  this.pos = 0;
+}
+
+dblbook.ReaderIterator.prototype.next = function() {
+  if (this.pos < this.values.length) {
+    return {
+      value: this.values[this.pos++],
+      done: false
+    }
+  } else {
+    return {
+      value: null,
+      done: true
+    }
+  }
 }

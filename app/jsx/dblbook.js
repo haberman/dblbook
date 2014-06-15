@@ -4,6 +4,20 @@ function repeat(str, times) {
   return new Array(times + 1).join(str);
 }
 
+function assert(val) {
+  if (!val) {
+    throw "Assertion failed.";
+  }
+}
+
+function getValueFromIterator(iter) {
+  var pair = iter.next();
+  assert(!pair.done);
+  var ret = pair.value;
+  assert(iter.next().done);
+  return ret;
+}
+
 var nbsp = String.fromCharCode(160)
 
 /**
@@ -14,25 +28,28 @@ var DblbookSubscribeMixin = {
   // from the DB.  It will cause the component to be re-rendered when the
   // object changes.
   subscribe: function(obj) {
-    this.db = obj.db;
-    obj.db.subscribe(this, obj, this.forceUpdate.bind(this));
+    obj.subscribe(this, this.forceUpdate.bind(this));
+    this.subscribed.add(obj);
+  },
+
+  unsubscribeAll: function() {
+    var self = this;
+    iterate(this.subscribed.values(), function(obj) { obj.unsubscribe(self); });
+    this.subscribed.clear();
+  },
+
+  getInitialState: function() {
+    this.subscribed = new Set();
+    return {}
   },
 
   // Called right before the component updates.  We clear all existing
   // subscriptions, so that only ones that are "renewed" in render() are
   // kept.
-  componentWillUpdate: function() {
-    if (this.db) {
-      this.db.unsubscribe(this);
-    }
-  },
+  componentWillUpdate: function() { this.unsubscribeAll(); },
 
   // Called automatically when the component is being unmounted.
-  componentWillUnmount: function() {
-    if (this.db) {
-      this.db.unsubscribe(this);
-    }
-  }
+  componentWillUnmount: function() { this.unsubscribeAll(); },
 };
 
 /**
@@ -53,7 +70,7 @@ var AccountPage = React.createClass({
     </div>;
 
     this.subscribe(this.props.db.getRealRoot());
-    if (this.props.db.getRealRoot().children.size == 0) {
+    if (this.props.db.getRealRoot().children.size != 0) {
       uploadGnucash = null;
     }
 
@@ -133,13 +150,7 @@ var Account = React.createClass({
 
   // TODO: componentWillReceiveProps?
   componentWillMount: function() {
-    this.balance = this.props.account.newTimeSeries();
-    this.subscribe(this.props.account);
-    this.subscribe(this.balance);
-  },
-
-  componentWillUnmount: function() {
-    this.balance.release();
+    this.balance = this.props.account.newBalanceReader();
   },
 
   renderTriangle: function() {
@@ -155,11 +166,13 @@ var Account = React.createClass({
   },
 
   renderBalance: function() {
-    var str = this.balance.values[0];
+    var str = getValueFromIterator(this.balance.iterator());
     return <span>{str}</span>;
   },
 
   render: function() {
+    this.subscribe(this.balance);
+    this.subscribe(this.props.account);
     return <tr>
         <td>
           {repeat(nbsp, this.props.depth * 4)}

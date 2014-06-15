@@ -113,7 +113,7 @@ dbtest("CRUD account", function(db) {
 
 dbtest("Change notifications", function(db) {
   var notified = 0;
-  db.subscribe(this, db.getRealRoot(), function() {
+  db.getRealRoot().subscribe(this, function() {
     notified += 1;
   });
 
@@ -123,13 +123,13 @@ dbtest("Change notifications", function(db) {
   ok(db.createAccount({"name":"Test2", "type": "ASSET"}), "create account 2");
   equal(notified, 2, "Adding an account (2) notifies root (child list)");
 
-  db.unsubscribe(this);
+  db.getRealRoot().unsubscribe(this);
 
   ok(db.createAccount({"name":"Test3", "type": "ASSET"}), "create account 3");
   equal(notified, 2, "Adding an account (3) does NOT notify because we unsub'd");
 
   var notified2 = 0;
-  db.subscribe(this, db.getRealRoot(), function() {
+  db.getRealRoot().subscribe(this, function() {
     notified2 += 1;
   });
 
@@ -141,7 +141,7 @@ dbtest("Change notifications", function(db) {
   var testAccount = db.getRealRoot().children.get("Test");
   ok(testAccount);
   var testAccountGuid = testAccount.data.guid;
-  db.subscribe(this, testAccount, function() {
+  testAccount.subscribe(this, function() {
     notified3 += 1;
   });
 
@@ -159,7 +159,7 @@ dbtest("Change notifications", function(db) {
 
   var notified4 = 0;
   var subscriber2 = {};
-  db.subscribe(subscriber2, db.getRealRoot(), function() {
+  db.getRealRoot().subscribe(subscriber2, function() {
     notified4 += 1;
   });
 
@@ -175,7 +175,8 @@ dbtest("Change notifications", function(db) {
   equal(notified2, 4);
   equal(notified, 2);
 
-  db.unsubscribe(this);
+  db.getRealRoot().unsubscribe(this);
+  testAccount.unsubscribe(this);
   ok(db.createAccount({"name":"Test7", "type": "ASSET"}), "create account 7");
   equal(notified4, 3);
   equal(notified3, 2);
