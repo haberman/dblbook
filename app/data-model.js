@@ -4,6 +4,8 @@
  * @author jhaberman@gmail.com (Josh Haberman)
  */
 
+"use strict";
+
 var dblbook = {};
 
 dblbook.guid = function() {
@@ -57,6 +59,13 @@ function iterate(iter, func, funcThis) {
       func.call(funcThis, val);
     }
   }
+}
+
+function merge(obj1, obj2) {
+  var ret = {};
+  for (var attrname in obj1) { ret[attrname] = obj1[attrname]; }
+  for (var attrname in obj2) { ret[attrname] = obj2[attrname]; }
+  return ret;
 }
 
 function toposort(nodes) {
@@ -127,6 +136,8 @@ dblbook.SortedMapIterator.prototype.next = function() {
   }
 }
 
+/** dblbook.SortedMap *********************************************************/
+
 /**
  * Sorted string -> value map.
  */
@@ -192,6 +203,8 @@ dblbook.SortedMap.prototype.get = function(key) {
   var val = this.tree.find([key, null]);
   return val ? val[1] : null;
 }
+
+/** dblbook.Decimal ***********************************************************/
 
 /**
  * Returns an iterator over the map's entries, in key order.
@@ -302,24 +315,17 @@ dblbook.Decimal.prototype.toString = function() {
   return str.replace(/\B(?=(?:\d{3})+(?!\d))/g, ",");
 };
 
+/** dblbook.Balance ***********************************************************/
+
 /**
  * Class for representing the balance of an account.  Contains a set of decimal
  * balances and their associated commodities (currencies).
  * @constructor
  */
-dblbook.Balance = function(amounts) {
-  this.commodities = {};
-  for (var i in amounts) {
-    var amount = amounts[i];
-    this.commodities[amount.commodity] = new dblbook.Decimal(amount.quantity);
-  }
-  /* For string construction
-  if (data) {
-    var arr = str.match(/\$?(-?[0-9]*\.[0-9]+|[0-9]+)/);
-    if (!arr) throw "Yikes.";
-    this.commodities['USD'] = new dblbook.Decimal(arr[0]);
-  }
-  */
+dblbook.Balance = function(commodity, amount) {
+  this.commodities = new Map();
+  this.commodities.set(commodity, amount || new dblbook.Decimal());
+  this.primary = commodity;
 };
 
 /**
@@ -328,38 +334,39 @@ dblbook.Balance = function(amounts) {
  */
 dblbook.Balance.prototype.add = function(other) {
   var ret = this.dup();
-  for (var commodity in other.commodities) {
-    if (!(commodity in this.commodities)) {
-      ret.commodities[commodity] = new dblbook.Decimal();
+  iterate(other.commodities.entries(), function(commodity, val) {
+    if (!ret.commodities.has(commodity)) {
+      ret.commodities.set(commodity, new dblbook.Decimal());
     }
-    var sum = ret.commodities[commodity].add(other.commodities[commodity]);
-    if (sum.toString() == "0") {
-      delete ret.commodities[commodity];
+    var sum = ret.commodities.get(commodity).add(other.commodities.get(commodity));
+    if (sum.toString() == "0" && commodity != ret.primary) {
+      ret.commodities.delete(commodity);
     } else {
-      ret.commodities[commodity] = sum;
+      ret.commodities.set(commodity, sum);
     }
-  }
+  });
   return ret;
 };
 
 dblbook.Balance.prototype.dup = function() {
-  var ret = new dblbook.Balance();
-  for (var commodity in this.commodities) {
-    ret.commodities[commodity] = this.commodities[commodity];
-  }
+  var self = this;
+  var ret = new dblbook.Balance(this.primary);
+  iterate(this.commodities.entries(), function(commodity, val) {
+    ret.commodities.set(commodity, val);
+  });
   return ret;
 };
 
 dblbook.Balance.prototype.toString = function() {
   var strs = new Array();
-  for (var commodity in this.commodities) {
+  iterate(this.commodities.entries(), function(commodity, val) {
     // Special-case commodities with common symbols.
     if (commodity == "USD") {
-      strs.push("$" + this.commodities[commodity]);
+      strs.push("$" + val);
     } else {
-      strs.push(this.commodities[commodity] + " " + commodity);
+      strs.push(val + " " + commodity);
     }
-  }
+  });
   var ret = strs.join(", ");
   return ret;
 }
@@ -369,31 +376,45 @@ dblbook.isArray = function(val) {
   return Object.prototype.toString.call(val) === '[object Array]';
 }
 
+/** dblbook.Observable ********************************************************/
+
 /**
  * Observable interface / base class.
  *
- * Objects that inherit from this (dblbook.Account and dblbook.Reader) allow
- * you to receive notification when the object changes.
- *
+ * Objects that inherit from this (dblbook.Account, dblbook.Transaction, and
+ * dblbook.Reader) allow you to receive notification when the object changes.
  */
 dblbook.Observable = function() {
   this.subscribers = new Map();
 }
 
 /**
- * Registers this callback, which will be called whenever this object
- * changes.  Any callback previously registered for this subcriber will
- * be replaced.
+ * Registers this callback, which will be called whenever this object changes.
+ * Any callback previously registered for this subcriber will be replaced.
+ *
+ * Note that subscribing to an object only gives you notifications for when
+ * that object itself changes.  It does not give you notifications when related
+ * information changes.  For example, subscribing to a dblbook.Account does
+ * not deliver change notifications when transactions are added to the account,
+ * because transactions are not directly available from the Account object.
  */
 dblbook.Observable.prototype.subscribe = function(subscriber, callback) {
+  var wasEmpty = this.subscribers.size == 0;
   this.subscribers.set(subscriber, callback);
+  if (wasEmpty && this._notifyHasSubscribers) {
+    this._notifyHasSubscribers();
+  }
 }
 
 /**
  * Unregisters any previously registered callback for this subscriber.
  */
 dblbook.Observable.prototype.unsubscribe = function(subscriber) {
+  var wasEmpty = this.subscribers.size == 0;
   this.subscribers.delete(subscriber);
+  if (!wasEmpty && this.subscribers.size == 0 && this._notifyNoSubscribers) {
+    this._notifyNoSubscribers();
+  }
 }
 
 /**
@@ -401,8 +422,15 @@ dblbook.Observable.prototype.unsubscribe = function(subscriber) {
  * changed.
  */
 dblbook.Observable.prototype._notifyChange = function() {
-  iterate(this.subscribers.values(), function(cb) { cb(); });
+  // Important: must gather the callbacks into an array first, because
+  // delivering the notification can call back into unsubscribe().
+  var callbacks = iterToArray(this.subscribers.values());
+  for (var i in callbacks) {
+    callbacks[i]();
+  }
 }
+
+/** dblbook.DB ****************************************************************/
 
 /**
  * The top-level "database" object that contains all accounts and transactions
@@ -426,11 +454,21 @@ dblbook.DB = function(idb, callback) {
   this.idb = idb;
 
   this.accountsByGuid = new Map();
-  this.accountsByGuid.set("REAL_ROOT", new dblbook.Account(this));
-  this.accountsByGuid.set("NOMINAL_ROOT", new dblbook.Account(this));
+  this.accountsByGuid.set("REAL_ROOT", new dblbook.Account(this, {
+    "name": "Real Root Account (internal)",
+    "guid": "REAL_ROOT",
+    "type": "ASSET",
+    "commodity_guid": "USD"
+  }));
+  this.accountsByGuid.set("NOMINAL_ROOT", new dblbook.Account(this, {
+    "name": "Nominal Root Account (internal)",
+    "guid": "NOMINAL_ROOT",
+    "type": "INCOME",
+    "commodity_guid": "USD"
+  }));
 
-  this.subscriptionsByObj = new Map();
-  this.subscriptionsBySubscriber = new Map();
+  // Key is [decimal usec][guid].
+  this.transactionsByTime = new dblbook.SortedMap();
 
   var i = 2;
   var barrier = function() {
@@ -476,31 +514,24 @@ dblbook.DB.prototype._loadAccounts = function(callback) {
  * want to replace this with lazy loading.
  */
 dblbook.DB.prototype._loadTransactions = function(callback) {
-  callback();
-  return;
   var self = this;
-  var txn = this.idb.transaction("transactions", "readonly");
-  var accounts = []
 
-  txn.objectStore("accounts").openCursor().onsuccess = function(event) {
+  // It's confusing but there are two different kinds of transactions going on
+  // here: IndexedDB database transactions and the app-level financial
+  // transactions we are loading.
+  var dbTxn = this.idb.transaction("transactions", "readonly");
+
+  dbTxn.objectStore("transactions").openCursor().onsuccess = function(event) {
     var cursor = event.target.result;
     if (cursor) {
-      accounts.push(cursor.value);
+      var txn = new dblbook.Transaction(self, cursor.value);
       cursor.continue();
     } else {
-      // Need to ensure that we add parent accounts before children.
-      accounts = toposort(accounts);
-      accounts.reverse();
-
-      accounts.forEach(function(account) {
-        var account = new dblbook.Account(self, account);
-      });
-
+      // Finished reading transactions.
       callback();
     }
   }
 }
-
 
 /**
  * Internal-only method to load transactions; calls callback when finished.
@@ -570,19 +601,50 @@ dblbook.DB.delete = function(callback) {
  *
  * @param txn Data for a transaction (as in model.proto).
  */
-dblbook.DB.prototype.transactionIsValid = function(txn) {
-  if (!dblbook.transactionIsValid(txn)) {
+dblbook.DB.prototype.transactionIsValid = function(txnData) {
+  if (!dblbook.Transaction.isValid(txnData)) {
     return false;
   }
 
-  for (var i in txn.entry) {
-    var entry = txn.entry[i]
+  if (this.unbalancedAmount(txnData)) {
+    return false;
+  }
+
+  for (var i in txnData.entry) {
+    var entry = txnData.entry[i]
     if (!this.accountsByGuid.has(entry.account_guid)) {
       return false;
     }
   }
 
   return true;
+}
+
+/**
+ * If the transaction is unbalanced, returns the unbalanced balance.
+ * Otherwise, (if the transaction is balanced), returns null.
+ */
+dblbook.DB.prototype.unbalancedAmount = function(txnData) {
+  var unbalanced = new dblbook.Balance("USD");
+
+  for (var i in txnData.entry) {
+    var entry = txnData.entry[i]
+    if (typeof entry.account_guid != "string" ||
+        typeof entry.amount != "string") {
+      return false;
+    }
+
+    var account = this.accountsByGuid.get(entry.account_guid);
+    var amount = new dblbook.Decimal(entry.amount);
+    var entryAmount = new dblbook.Balance(account.data.commodity_guid, amount);
+    unbalanced = unbalanced.add(entryAmount);
+  }
+
+  if (unbalanced.toString() == "$0") {
+    return null;
+  } else {
+    return unbalanced;
+  }
 }
 
 /**
@@ -635,7 +697,8 @@ dblbook.DB.prototype.createAccount = function(accountData) {
  *
  * @param {Transaction} transaction The transaction to add.
  */
-dblbook.DB.prototype.createTransaction = function(transaction) {
+dblbook.DB.prototype.createTransaction = function(transactionData) {
+  var ret = new dblbook.Transaction(this, transactionData);
 }
 
 /**
@@ -671,6 +734,8 @@ dblbook.DB.prototype.getAccountByGuid = function(guid) {
   return this.accountsByGuid.get(guid);
 }
 
+/** dblbook.Account ***********************************************************/
+
 /**
  * Class for representing an account.
  *
@@ -689,25 +754,10 @@ dblbook.Account = function(db, data) {
   this.data = data;
   this.parent = null;
   this.children = new dblbook.SortedMap();
-
-  if (!data) {
-    // Root account.
-    return;
-  }
-
-  var parentGuid = data.parent_guid || rootForType(data.type);
-  this.parent = this.db.getAccountByGuid(parentGuid);
+  this.dataObservers = new Set();
 
   if (!dblbook.Account.isValid(data)) {
     throw "invalid account";
-  }
-
-  if (!this.parent) {
-    throw "parent account does not exist.";
-  }
-
-  if (this.parent.children.has(data.name)) {
-    throw "account already exists with this name";
   }
 
   if (data.guid) {
@@ -718,14 +768,37 @@ dblbook.Account = function(db, data) {
     data.guid = dblbook.guid();
   }
 
+  if (data.guid != rootForType(data.type)) {
+    var parentGuid = data.parent_guid || rootForType(data.type);
+    this.parent = this.db.getAccountByGuid(parentGuid);
+
+    if (!this.parent) {
+      throw "parent account does not exist.";
+    }
+
+    if (this.parent.children.has(data.name)) {
+      throw "account already exists with this name";
+    }
+  }
+
   Object.freeze(data);
 
-  this.parent.children.set(data.name, this);
   this.db.accountsByGuid.set(data.guid, this);
-  this.parent._notifyChange();
+
+  if (this.parent) {
+    this.parent.children.set(data.name, this);
+    this.parent._notifyChange();
+  }
 }
 
 // Account extends Observable.
+//
+// Subscribing to an account only notifies you about changes in the Account
+// *definition* (like its name, parent, children, type).
+//
+// Subscribing to an account does *not* notify you about any transaction or
+// balance data about the account.  For that, create a Reader and subscribe
+// to it.
 dblbook.Account.prototype = Object.create(dblbook.Observable.prototype);
 dblbook.Account.prototype.constructor = dblbook.Account;
 
@@ -737,7 +810,8 @@ dblbook.Account.prototype.constructor = dblbook.Account;
 dblbook.Account.isValid = function(accountData) {
   var ret = typeof accountData.name == "string" &&
       typeof accountData.type == "string" &&
-      typeof rootForType(accountData.type) == "string";
+      typeof rootForType(accountData.type) == "string" &&
+      typeof accountData.commodity_guid == "string";
   if (!ret) {
     console.log("Invalid account: ", accountData);
   }
@@ -750,6 +824,10 @@ dblbook.Account.isValid = function(accountData) {
 dblbook.Account.prototype.update = function(newData) {
   if (!dblbook.Account.isValid(newData)) {
     throw "invalid account";
+  }
+
+  if (this.data.guid == rootForType(this.data.type)) {
+    throw "Cannot update a root account.";
   }
 
   if (newData.guid) {
@@ -845,9 +923,17 @@ dblbook.Account.prototype.delete = function() {
  *
  *   // When true, amounts include transactions for all child accounts.
  *   "includeChildren": true,
+ * }
  */
 dblbook.Account.prototype.newBalanceReader = function(options) {
-  return new dblbook.Reader();
+  var opts = merge(options, {
+    count: 1,
+    end: new Date(),
+    delta: false,
+    frequency: "FOREVER",
+    includeChildren: true
+  });
+  return new dblbook.Reader(this, opts, this._calculateBalances);
 }
 
 /**
@@ -869,9 +955,55 @@ dblbook.Account.prototype.newBalanceReader = function(options) {
  * Note: if this is a *leaf* account, the ordering will reflect the post date
  * if any (for the entry in this account).  For all non-leaf accounts, the
  * ordering reflects the transaction's time.
+ *
+ * Note: the Reader is only considered to change when the *set* of transactions
+ * changes.  The actual *contents* of the transactions are not monitored; to
+ * keep track of those, subscribe to the contained Transactions themselves.
  */
 dblbook.Account.prototype.newTransactionReader = function(options) {
+  return new dblbook.Reader(this, options, this._getTransactions);
 }
+
+/**
+ * Internal-only method called whenever any data changes for this account.
+ *
+ * Right now we have a very coarse and inefficient method for propagating
+ * changes: whenever any transaction changes for this account, we recompute
+ * from scratch data for any Reader objects currently attached to the
+ * account.
+ *
+ * There is TONS of room to optimize this.
+ */
+dblbook.Account.prototype._onDataChange = function() {
+  var self = this;
+  iterate(this.dataObservers.values(), function(reader) {
+    reader._refresh();
+  });
+}
+
+/**
+ * Internal-only method for calculating a series of balances.
+ */
+dblbook.Account.prototype._calculateBalances = function(options) {
+  // Starting small, this is all we support to begin.
+  if (options.frequency != "FOREVER" ||
+      options.delta ||
+      options.count != 1) {
+    throw "Unsupported configuration."
+  }
+
+  var total = new dblbook.Balance("USD");
+  return [total];
+}
+
+/**
+ * Internal-only method for getting a series of transactions.
+ */
+dblbook.Account.prototype._getTransactions = function(options) {
+  return ["$1000"]
+}
+
+/** dblbook.Transaction *******************************************************/
 
 /**
  * dblbook.Transaction: object representing a transaction in the database.
@@ -880,62 +1012,43 @@ dblbook.Account.prototype.newTransactionReader = function(options) {
  * - db: link back to the database
  * - data: the raw data for this Transaction (as in model.proto)
  */
-dblbook.Transaction = function(db, data) {
-  this.db = db;
-  this.data = data;
+dblbook.Transaction = function(db, txnData) {
+  dblbook.Observable.call(this);
 
-  if (!this.transactionIsValid(txn)) {
+  this.db = db;
+  this.data = txnData;
+
+  if (!this.db.transactionIsValid(txnData)) {
     throw "invalid transaction";
   }
 
-  if (txn.guid) {
-    if (this.transactionsByGuid[txn.guid]) {
+  if (txnData.guid) {
+    if (this.db.transactionsByGuid[txnData.guid]) {
       throw "Tried to duplicate existing transaction.";
     }
   } else {
-    txn.guid = dblbook.guid();
+    txnData.guid = dblbook.guid();
   }
 
-  Object.freeze(txn);
+  Object.freeze(txnData);
 
-  var txnObj = new dblbook.Transaction(this, txn)
-
-  this.accountsByGuid.set(account.guid, txnObj);
-  parent.children.set(account.name, txnObj);
-
-  this._notifyChange(parent);
-
-  return txnObj;
+  this.db.transactionsByGuid[txnData.guid] = this;
+  this.db.transactionsByTime[this._byTimeKey()] = this;
+  this._updateAccountInfo();
 }
 
-/**
- * If the transaction is unbalanced, returns the unbalanced balance.
- * Otherwise, (if the transaction is balanced), returns null.
- */
-dblbook.Transaction.unbalancedAmount = function(txnData) {
-  var unbalanced = new dblbook.Balance();
-
-  for (var i in txnData.entry) {
-    var entry = txnData.entry[i]
-    if (typeof entry.account_guid != "string" ||
-        !dblbook.isArray(entry.amount) ||
-        entry.amount.length < 1) {
-      return false;
-    }
-    unbalanced = unbalanced.add(new dblbook.Balance(entry.amount));
-  }
-
-  if (unbalanced.toString() == "") {
-    return null;
-  } else {
-    return unbalanced;
-  }
-}
+// Transaction extends Observable.
+dblbook.Transaction.prototype = Object.create(dblbook.Observable.prototype);
+dblbook.Transaction.prototype.constructor = dblbook.Transaction;
 
 /**
  * Returns true if the given transaction is valid in isolation.
+ *
  * Does not validate things external to this transaction, like that all of the
  * accounts must exist.
+ *
+ * We also can't validate that the amounts balance here, because we don't know
+ * the currency/commodity of the referenced accounts.
  */
 dblbook.Transaction.isValid = function(txnData) {
   if (typeof txnData.timestamp != "number" ||
@@ -950,14 +1063,9 @@ dblbook.Transaction.isValid = function(txnData) {
     if (typeof entry.account_guid != "string" ||
         entry.account_guid == "REAL_ROOT" ||
         entry.account_guid == "NOMINAL_ROOT" ||
-        !dblbook.isArray(entry.amount) ||
-        entry.amount.length < 1) {
+        typeof entry.amount != "string") {
       return false;
     }
-  }
-
-  if (dblbook.Transaction.unbalancedAmount(txnData)) {
-    return false;
   }
 
   return true;
@@ -965,13 +1073,14 @@ dblbook.Transaction.isValid = function(txnData) {
 
 /**
  * Returns info about this transaction pertaining to the given account.
- * If this account does not have an entry in this transaction, returns null.
+ * If there is no entry for this account (or any sub-account) in this
+ * transaction, returns null.
  *
  *  - description: effective description (including defaulting txn's).
- *  - date: either string postdate (for display) or integer timestamp from txn.
- *  - amount: dblbook.Decimal: amount for this txn.
- *  - balance: dblbook.Balance: current cumulative balance for this account
- *    (includes all transactions for this account and all sub-accounts).
+ *  - date: either string postdate (for display) or JS Date object from txn.
+ *  - amount: dblbook.Decimal: amount for this txn for this specific account.
+ *  - totalAmount: dblbook.Balance: amount for this txn in this and all
+ *    sub-accounts.
  */
 dblbook.Transaction.prototype.getAccountInfo = function(accountGuid) {
 }
@@ -995,6 +1104,64 @@ dblbook.Transaction.prototype.delete = function() {
 }
 
 /**
+ * Internal-only method that should be called whenever the transaction data
+ * changes, which will update the internal data that is derived from the raw
+ * transaction data.
+ *
+ * Also triggers notifications to anyone watching the transaction, and to any
+ * register or time series objects that depend on this data.
+ */
+dblbook.Transaction.prototype._updateAccountInfo = function() {
+  this.accountInfo = new Map();
+
+  for (var i in txnData.entry) {
+    var entry = txnData.entry[i];
+    var entryAccount = this.accountsByGuid.get(entry.account_guid);
+    var entryAccountIsLeaf = (entryAccount.children.size == 0);
+    var account = entryAccount;
+
+    do {
+      var guid = account.data.guid;
+      var info = this.accountInfo.get(guid)
+      var isEntryAccount = (account == entryAccount);
+
+      if (!info) {
+        info = {
+          description: this.data.description,
+          date: this.date,
+          amount: new dblbook.Decimal(),
+          totalAmount: new dblbook.Balance()
+        };
+
+        if (isEntryAccount && entry.description) {
+          info.description = entry.description;
+        }
+
+        if (isEntryAccount && entryAccountIsLeaf && entry.postdate) {
+          info.date = entry.postdate;
+        }
+
+        this.accountInfo.set(guid, info);
+      }
+
+      info.totalAmount.add(new dblbook.Balance(entry.amount));
+    } while ((account = account.parent) != null);
+  }
+
+  // Triggers updates (and notifications) to any time series or transaction
+  // reader objects.
+  iterate(this.accountInfo.keys(), function(account) {
+    account._onDataChange();
+  });
+
+  // Triggers notifications to any objects watching the transaction itself.
+  this._notifyChange();
+}
+
+
+/** dblbook.Reader ************************************************************/
+
+/**
  * A Reader is an iterable object that is kept up-to-date whenever the DB
  * changes.
  *
@@ -1014,29 +1181,49 @@ dblbook.Transaction.prototype.delete = function() {
  *
  * @constructor
  */
-dblbook.Reader = function() {
+dblbook.Reader = function(account, options, calculate) {
   dblbook.Observable.call(this);
+  this.account = account;
+  this.options = options;
+  this.calculate = calculate;
+  this._refresh();
 }
 
 // Reader extends Observable.
 dblbook.Reader.prototype = Object.create(dblbook.Observable.prototype);
 dblbook.Reader.prototype.constructor = dblbook.Reader;
 
-dblbook.Reader.prototype.iterator = function() {
-  return new dblbook.ReaderIterator();
-}
-
 /**
- * The Subscription protocol (see above).
+ * Returns a ES6-style iterator to whatever data is available for this Reader.
+ *
+ * If the data is not loaded yet, the iterator may return a short count or no
+ * data at all.
+ *
+ * The iterator is invalidated by any change to the database, or even
+ * asynchronous loading, so the caller should consume all of the data before
+ * giving up control.
  */
-dblbook.Reader.prototype.subscribe = function(subscriber, callback) {
+dblbook.Reader.prototype.iterator = function() {
+  return new dblbook.ReaderIterator(this.values);
 }
 
-dblbook.Reader.prototype.unsubscribe = function(subscriber) {
+dblbook.Reader.prototype._notifyHasSubscribers = function() {
+  this._refresh();
+  this.account.dataObservers.add(this);
 }
 
-dblbook.ReaderIterator = function() {
-  this.values = ["$1000"];
+dblbook.Reader.prototype._notifyNoSubscribers = function() {
+  this.account.dataObservers.delete(this);
+}
+
+dblbook.Reader.prototype._refresh = function() {
+  this.values = this.calculate.call(this.account, this.options);
+}
+
+/** dblbook.ReaderIterator ****************************************************/
+
+dblbook.ReaderIterator = function(values) {
+  this.values = values;
   this.pos = 0;
 }
 

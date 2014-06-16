@@ -18,6 +18,46 @@ function getValueFromIterator(iter) {
   return ret;
 }
 
+/*
+
+function setTimeoutRequestAnimationFrame(cb) {
+  setTimeout(cb, 1000 / 60);
+};
+
+var requestAnimationFrame;
+
+if (typeof window === 'undefined') {
+  requestAnimationFrame = setTimeoutRequestAnimationFrame;
+} else {
+  requestAnimationFrame = window.requestAnimationFrame ||
+    window.webkitRequestAnimationFrame ||
+    window.mozRequestAnimationFrame ||
+    window.msRequestAnimationFrame ||
+    setTimeoutRequestAnimationFrame;
+}
+
+function tick() {
+  ReactUpdates.flushBatchedUpdates();
+  requestAnimationFrame(tick);
+}
+
+var ReactRAFBatchingStrategy = {
+  isBatchingUpdates: true,
+
+  /**
+   * Call the provided function in a context within which calls to `setState`
+   * and friends are batched such that components aren't updated unnecessarily.
+   * /
+  batchedUpdates: function(callback, param) {
+    callback(param);
+  }
+};
+
+requestAnimationFrame(tick);
+
+ReactUpdates.injection.injectBatchingStrategy(ReactRAFBatchingStrategy);
+*/
+
 var nbsp = String.fromCharCode(160)
 
 /**
@@ -28,13 +68,16 @@ var DblbookSubscribeMixin = {
   // from the DB.  It will cause the component to be re-rendered when the
   // object changes.
   subscribe: function(obj) {
-    obj.subscribe(this, this.forceUpdate.bind(this));
+    if (!this.guid) {
+      this.guid = dblbook.guid();
+    }
+    obj.subscribe(this.guid, this.forceUpdate.bind(this));
     this.subscribed.add(obj);
   },
 
   unsubscribeAll: function() {
     var self = this;
-    iterate(this.subscribed.values(), function(obj) { obj.unsubscribe(self); });
+    iterate(this.subscribed.values(), function(obj) { obj.unsubscribe(self.guid); });
     this.subscribed.clear();
   },
 
@@ -102,30 +145,29 @@ var AccountList = React.createClass({
     this.setState(newState);
   },
 
-  renderChildren: function(account, depth, children) {
+  renderAccount: function(account, depth, expanded) {
+    this.subscribe(account);
+    this.children.push(
+      <Account key={account.data.guid}
+               expanded={expanded}
+               account={account}
+               depth={depth + 1}
+               ontoggle={this.onToggle.bind(this, account.data.guid)} />);
+    if (expanded) {
+      this.renderChildren(account, depth + 1)
+    }
+  },
+
+  renderChildren: function(account, depth) {
     iterate(account.children.iterator(), function(name, child) {
-      this.subscribe(child);
-      var expanded = this.state[child.data.guid];
-      children.push(
-        <Account key={child.data.guid}
-                 expanded={expanded}
-                 account={child}
-                 depth={depth + 1}
-                 ontoggle={this.onToggle.bind(this, child.data.guid)} />);
-      if (expanded) {
-        this.renderChildren(child, depth + 1, children)
-      }
+      this.renderAccount(child, depth, this.state[child.data.guid]);
     }, this);
   },
 
   render: function() {
-    var children = []
-    this.subscribe(this.props.root);
-    this.renderChildren(this.props.root, 0, children);
-    children.push(<tr key="Net Worth">
-      <td><b>Net Worth</b></td>
-      <td>$2000</td>
-    </tr>);
+    this.children = [];
+    this.renderChildren(this.props.root, 0);
+    this.renderAccount(this.props.root, 0, false);
 
     return <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
       <thead>
@@ -136,7 +178,7 @@ var AccountList = React.createClass({
       </thead>
 
       <tbody>
-        {children}
+        {this.children}
       </tbody>
     </table>;
   }
@@ -166,20 +208,31 @@ var Account = React.createClass({
   },
 
   renderBalance: function() {
-    var str = getValueFromIterator(this.balance.iterator());
+    var str = getValueFromIterator(this.balance.iterator()).toString();
     return <span>{str}</span>;
   },
 
   render: function() {
+    var account = this.props.account;
+
     this.subscribe(this.balance);
-    this.subscribe(this.props.account);
+    this.subscribe(account);
+
+    var nameText = <span>
+      {repeat(nbsp, this.props.depth * 4)}
+      {this.renderTriangle()}
+      &nbsp;&nbsp;&nbsp;
+      <a href="#">{account.data.name}</a>
+    </span>;
+
+    if (account.data.guid == "REAL_ROOT") {
+      nameText = <b>Net Worth</b>;
+    } else if (account.data.guid == "NOMINAL_ROOT") {
+      nameText = <b>Total Income/Expense</b>;
+    }
+
     return <tr>
-        <td>
-          {repeat(nbsp, this.props.depth * 4)}
-          {this.renderTriangle()}
-          &nbsp;&nbsp;&nbsp;
-          <a href="#">{this.props.account.data.name}</a>
-        </td>
+        <td>{nameText}</td>
         <td>{this.renderBalance()}&nbsp;</td>
       </tr>;
   }

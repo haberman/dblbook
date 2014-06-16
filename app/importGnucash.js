@@ -9,6 +9,15 @@ function getXmlText(node, ns, name) {
   return found ? found.innerHTML : undefined;
 }
 
+function getXmlText2(node, ns, name, ns2, name2) {
+  var found = node.getElementsByTagNameNS(ns, name)[0];
+  if (!found) {
+    return undefined;
+  }
+  found = found.getElementsByTagNameNS(ns2, name2)[0];
+  return found ? found.innerHTML : undefined;
+}
+
 function mapType(type) {
   if (type == "BANK") {
     return "ASSET";
@@ -32,10 +41,13 @@ function importGnucash2(xmlString, db, rootForNew) {
   // Namespaces.
   var gnc = "http://www.gnucash.org/XML/gnc";
   var act = "http://www.gnucash.org/XML/act";
+  var trn = "http://www.gnucash.org/XML/trn";
+  var ts = "http://www.gnucash.org/XML/ts";
   var xml = parseXml(xmlString);
 
   var gnucashRootGuid;
 
+  // Import accounts.
   var accounts = xml.getElementsByTagNameNS(gnc, "account");
   for (var i = 0; i < accounts.length; i++) {
     var gnucashAccount = accounts[i];
@@ -63,6 +75,23 @@ function importGnucash2(xmlString, db, rootForNew) {
 
       db.createAccount(newAccount);
     }
+  }
+
+  // Import transactions.
+  var transactions = xml.getElementsByTagNameNS(gnc, "transaction");
+  for (var i = 0; i < transactions.length; i++) {
+    var gnucashTransaction = transactions[i];
+    var newAccount = {
+      guid: getXmlText(gnucashTransaction, trn, "id"),
+      timestamp: getXmlText2(gnucashTransaction, trn, "date-posted", ts, "date"),
+      description: getXmlText(gnucashTransaction, trn, "description"),
+    }
+
+    newAccount.timestamp = Date.parse(newAccount.timestamp) * 1000;
+
+    console.log(newAccount);
+
+    db.createTransaction(gnucashTransaction);
   }
 }
 
