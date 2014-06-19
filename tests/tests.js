@@ -25,6 +25,14 @@ function runTestWithDb(func) {
   });
 }
 
+function getValueFromIterator(iter) {
+  var pair = iter.next();
+  ok(!pair.done);
+  var ret = pair.value;
+  ok(iter.next().done);
+  return ret;
+}
+
 function dbtest(name, func) {
   test(name, function() {
     stop();
@@ -74,6 +82,67 @@ test("account validity", function() {
   ok(dblbook.Account.isValid({
     "name":"Test", "type": "ASSET", "commodity_guid": "USD"
   }), "valid account 1");
+});
+
+test("decimal", function() {
+  var isTrulyZero = function(zero) {
+    ok(zero.isZero(), "zero value isZero()");
+    ok(zero.toString() == "0", "zero value has 0 representation");
+  }
+
+  var zero = new dblbook.Decimal();
+  ok(zero, "no-arg constructor");
+  isTrulyZero(zero);
+  isTrulyZero(zero.neg());
+  isTrulyZero(zero.add(zero));
+  isTrulyZero(zero.add(new dblbook.Decimal()));
+
+  var onePtOne = new dblbook.Decimal("1.1");
+  equal(onePtOne.value, 11);
+  equal(onePtOne.precision, 1);
+  ok(!onePtOne.isZero());
+
+  var other = new dblbook.Decimal("200.02");
+  equal(other.value, 20002);
+  equal(other.precision, 2);
+  ok(!other.isZero());
+
+  var sum = onePtOne.add(other);
+  equal(sum.value, 20112);
+  equal(sum.precision, 2);
+  ok(!sum.isZero());
+
+  var neg = new dblbook.Decimal("-76000.007");
+  equal(neg.value, -76000007);
+  equal(neg.precision, 3);
+  equal("-76,000.007", neg.toString());
+  ok(!neg.isZero());
+
+  var sum2 = zero.add(neg);
+  equal(sum2.value, -76000007);
+  equal(sum2.precision, 3);
+  equal("-76,000.007", sum2.toString());
+  ok(!sum2.isZero());
+});
+
+test("balance", function() {
+  var empty = new dblbook.Balance();
+  ok(empty.isEmpty());
+  equal(empty.toString(), "");
+
+  var emptyWithCurrency = new dblbook.Balance("USD");
+  ok(emptyWithCurrency.isEmpty());
+  equal(emptyWithCurrency.toString(), "$0.00");
+
+  var bal = new dblbook.Balance();
+  bal.add(new dblbook.Balance());
+  ok(bal.isEmpty());
+
+  bal.add(emptyWithCurrency);
+  ok(bal.isEmpty());
+
+  var bal2 = bal.add(new dblbook.Balance("USD", "5.23"));
+  equal(bal2.toString(), "$5.23");
 });
 
 dbtest("empty DB", function(db) {
@@ -223,3 +292,45 @@ dbtest("restore data from IDB", function(db) {
     ok(sub);
   });
 })
+
+dbtest("balances", function(db) {
+  var account1 = db.createAccount(act({"name":"Test"}));
+  var balance1 = account1.newBalanceReader()
+  var fired1 = 0;
+  balance1.subscribe(this, function() {
+    fired1++;
+  });
+  equal(fired1, 0);
+  ok(getValueFromIterator(balance1.iterator()).isEmpty());
+
+  var account2 = db.createAccount(act({"name":"Test2"}));
+  var balance2 = account2.newBalanceReader()
+  var fired2 = 0;
+  balance2.subscribe(this, function() {
+    fired2++;
+  });
+  ok(getValueFromIterator(balance2.iterator()).isEmpty());
+
+  var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
+  var balanceSub = sub.newBalanceReader()
+  var firedSub = 0;
+  balanceSub.subscribe(this, function() {
+    firedSub++;
+  });
+  ok(getValueFromIterator(balanceSub.iterator()).isEmpty());
+
+  var txn1 = db.createTransaction({
+    description: "Transaction 1",
+    timestamp: new Date().getTime(),
+    entry: [
+      {"account_guid": account1.data.guid, "amount": "1"},
+      {"account_guid": account2.data.guid, "amount": "-1"},
+    ]
+  });
+
+  ok(txn1);
+  equal(fired1, 1);
+  equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
+  equal(fired2, 1);
+  equal(getValueFromIterator(balance2.iterator()).toString(), "-$1.00");
+});

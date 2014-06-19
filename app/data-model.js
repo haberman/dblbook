@@ -204,14 +204,14 @@ dblbook.SortedMap.prototype.get = function(key) {
   return val ? val[1] : null;
 }
 
-/** dblbook.Decimal ***********************************************************/
-
 /**
  * Returns an iterator over the map's entries, in key order.
  */
 dblbook.SortedMap.prototype.iterator = function() {
   return new dblbook.SortedMapIterator(this.tree.iterator());
 }
+
+/** dblbook.Decimal ***********************************************************/
 
 /**
  * Class for representing decimal numbers losslessly (unlike binary floating
@@ -306,6 +306,13 @@ dblbook.Decimal.prototype.sub = function(other) {
 };
 
 /**
+ * Returns true iff the value is zero.
+ */
+dblbook.Decimal.prototype.isZero = function() {
+  return this.value == 0;
+}
+
+/**
  * Converts the Decimal object to a string, retaining all significant digits.
  * @return {String} The string representation.
  */
@@ -324,8 +331,16 @@ dblbook.Decimal.prototype.toString = function() {
  */
 dblbook.Balance = function(commodity, amount) {
   this.commodities = new Map();
-  this.commodities.set(commodity, amount || new dblbook.Decimal());
-  this.primary = commodity;
+  if (commodity) {
+    if (!amount) {
+      // Is 2 a good default for this?
+      amount = new dblbook.Decimal(0, 2);
+    } else if (!(amount instanceof dblbook.Decimal)) {
+      amount = new dblbook.Decimal(amount);
+    }
+    this.commodities.set(commodity, amount);
+    this.primary = commodity;
+  }
 };
 
 /**
@@ -338,8 +353,12 @@ dblbook.Balance.prototype.add = function(other) {
     if (!ret.commodities.has(commodity)) {
       ret.commodities.set(commodity, new dblbook.Decimal());
     }
-    var sum = ret.commodities.get(commodity).add(other.commodities.get(commodity));
-    if (sum.toString() == "0" && commodity != ret.primary) {
+
+    var amt1 = ret.commodities.get(commodity);
+    var amt2 = other.commodities.get(commodity);
+    var sum = amt1.add(amt2);
+
+    if (sum.isZero() && commodity != ret.primary) {
       ret.commodities.delete(commodity);
     } else {
       ret.commodities.set(commodity, sum);
@@ -362,13 +381,37 @@ dblbook.Balance.prototype.toString = function() {
   iterate(this.commodities.entries(), function(commodity, val) {
     // Special-case commodities with common symbols.
     if (commodity == "USD") {
-      strs.push("$" + val);
+      val = val.toString();
+      var isNegative = false;
+      if (val.substring(0, 1) == "-") {
+        isNegative = true;
+        val = val.substring(1);
+      }
+      val = "$" + val;
+      if (isNegative) {
+        val = "-" + val;
+      }
+      strs.push(val);
     } else {
       strs.push(val + " " + commodity);
     }
   });
   var ret = strs.join(", ");
   return ret;
+}
+
+dblbook.Balance.prototype.isEmpty = function() {
+  if (this.commodities.size == 0) {
+    return true;
+  }
+
+  if (this.commodities.size == 1 &&
+      this.commodities.get(this.primary) &&
+      this.commodities.get(this.primary).isZero()) {
+    return true;
+  }
+
+  return false;
 }
 
 dblbook.isArray = function(val) {
@@ -399,11 +442,10 @@ dblbook.Observable = function() {
  * because transactions are not directly available from the Account object.
  */
 dblbook.Observable.prototype.subscribe = function(subscriber, callback) {
-  var wasEmpty = this.subscribers.size == 0;
-  this.subscribers.set(subscriber, callback);
-  if (wasEmpty && this._notifyHasSubscribers) {
+  if (this.subscribers.size == 0 && this._notifyHasSubscribers) {
     this._notifyHasSubscribers();
   }
+  this.subscribers.set(subscriber, callback);
 }
 
 /**
@@ -469,6 +511,7 @@ dblbook.DB = function(idb, callback) {
 
   // Key is [decimal usec][guid].
   this.transactionsByTime = new dblbook.SortedMap();
+  this.transactionsByGuid = new Map();
 
   var i = 2;
   var barrier = function() {
@@ -625,7 +668,7 @@ dblbook.DB.prototype.transactionIsValid = function(txnData) {
  * Otherwise, (if the transaction is balanced), returns null.
  */
 dblbook.DB.prototype.unbalancedAmount = function(txnData) {
-  var unbalanced = new dblbook.Balance("USD");
+  var unbalanced = new dblbook.Balance();
 
   for (var i in txnData.entry) {
     var entry = txnData.entry[i]
@@ -640,7 +683,7 @@ dblbook.DB.prototype.unbalancedAmount = function(txnData) {
     unbalanced = unbalanced.add(entryAmount);
   }
 
-  if (unbalanced.toString() == "$0") {
+  if (unbalanced.isEmpty()) {
     return null;
   } else {
     return unbalanced;
@@ -698,7 +741,7 @@ dblbook.DB.prototype.createAccount = function(accountData) {
  * @param {Transaction} transaction The transaction to add.
  */
 dblbook.DB.prototype.createTransaction = function(transactionData) {
-  var ret = new dblbook.Transaction(this, transactionData);
+  return new dblbook.Transaction(this, transactionData);
 }
 
 /**
@@ -926,13 +969,15 @@ dblbook.Account.prototype.delete = function() {
  * }
  */
 dblbook.Account.prototype.newBalanceReader = function(options) {
-  var opts = merge(options, {
+  var defaults = {
     count: 1,
     end: new Date(),
     delta: false,
     frequency: "FOREVER",
     includeChildren: true
-  });
+  };
+
+  var opts = merge(options, defaults);
   return new dblbook.Reader(this, opts, this._calculateBalances);
 }
 
@@ -992,7 +1037,16 @@ dblbook.Account.prototype._calculateBalances = function(options) {
     throw "Unsupported configuration."
   }
 
-  var total = new dblbook.Balance("USD");
+  var total = options.includeChildren ?
+      new dblbook.Balance(this.data.commodity_guid) : new dblbook.Decimal();
+  iterate(this.db.transactionsByTime.iterator(), function(key, txn) {
+    var info = txn.getAccountInfo(this.data.guid);
+
+    if (info) {
+      var amount = options.includeChildren ? info.totalAmount : info.amount;
+      total = total.add(amount);
+    }
+  }, this);
   return [total];
 }
 
@@ -1032,8 +1086,8 @@ dblbook.Transaction = function(db, txnData) {
 
   Object.freeze(txnData);
 
-  this.db.transactionsByGuid[txnData.guid] = this;
-  this.db.transactionsByTime[this._byTimeKey()] = this;
+  this.db.transactionsByGuid.set(txnData.guid, this);
+  this.db.transactionsByTime.add(this._byTimeKey(), this);
   this._updateAccountInfo();
 }
 
@@ -1083,6 +1137,7 @@ dblbook.Transaction.isValid = function(txnData) {
  *    sub-accounts.
  */
 dblbook.Transaction.prototype.getAccountInfo = function(accountGuid) {
+  return this.accountInfo.get(accountGuid);
 }
 
 /**
@@ -1112,11 +1167,13 @@ dblbook.Transaction.prototype.delete = function() {
  * register or time series objects that depend on this data.
  */
 dblbook.Transaction.prototype._updateAccountInfo = function() {
+  // Create new accountInfo for all accounts in the transaction (and their
+  // parents).
   this.accountInfo = new Map();
 
-  for (var i in txnData.entry) {
-    var entry = txnData.entry[i];
-    var entryAccount = this.accountsByGuid.get(entry.account_guid);
+  for (var i in this.data.entry) {
+    var entry = this.data.entry[i];
+    var entryAccount = this.db.getAccountByGuid(entry.account_guid);
     var entryAccountIsLeaf = (entryAccount.children.size == 0);
     var account = entryAccount;
 
@@ -1144,18 +1201,29 @@ dblbook.Transaction.prototype._updateAccountInfo = function() {
         this.accountInfo.set(guid, info);
       }
 
-      info.totalAmount.add(new dblbook.Balance(entry.amount));
+      info.amount = info.amount.add(new dblbook.Decimal(entry.amount));
+      var amountBalance =
+          new dblbook.Balance(account.data.commodity_guid, entry.amount);
+      info.totalAmount = info.totalAmount.add(amountBalance);
     } while ((account = account.parent) != null);
   }
 
   // Triggers updates (and notifications) to any time series or transaction
   // reader objects.
-  iterate(this.accountInfo.keys(), function(account) {
-    account._onDataChange();
-  });
+  iterate(this.accountInfo.keys(), function(guid) {
+    this.db.getAccountByGuid(guid)._onDataChange();
+  }, this);
 
   // Triggers notifications to any objects watching the transaction itself.
   this._notifyChange();
+}
+
+/**
+ * Internal only method to calculate the key for this transaction in the sorted
+ * map.
+ */
+dblbook.Transaction.prototype._byTimeKey = function() {
+  return this.data.timestamp.toString() + this.data.guid;
 }
 
 
@@ -1186,7 +1254,6 @@ dblbook.Reader = function(account, options, calculate) {
   this.account = account;
   this.options = options;
   this.calculate = calculate;
-  this._refresh();
 }
 
 // Reader extends Observable.
@@ -1218,6 +1285,7 @@ dblbook.Reader.prototype._notifyNoSubscribers = function() {
 
 dblbook.Reader.prototype._refresh = function() {
   this.values = this.calculate.call(this.account, this.options);
+  this._notifyChange();
 }
 
 /** dblbook.ReaderIterator ****************************************************/

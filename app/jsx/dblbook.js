@@ -10,6 +10,17 @@ function assert(val) {
   }
 }
 
+function setDifference(a, b) {
+  var ret = new Set();
+  iterate(a.values(), function(val) {
+    ret.add(val);
+  });
+  iterate(b.values(), function(val) {
+    ret.delete(val);
+  });
+  return ret;
+}
+
 function getValueFromIterator(iter) {
   var pair = iter.next();
   assert(!pair.done);
@@ -71,14 +82,12 @@ var DblbookSubscribeMixin = {
     if (!this.guid) {
       this.guid = dblbook.guid();
     }
-    obj.subscribe(this.guid, this.forceUpdate.bind(this));
-    this.subscribed.add(obj);
-  },
-
-  unsubscribeAll: function() {
-    var self = this;
-    iterate(this.subscribed.values(), function(obj) { obj.unsubscribe(self.guid); });
-    this.subscribed.clear();
+    if (this.newSubscriberSet) {
+      this.newSubscriberSet.add(obj);
+    } else {
+      obj.subscribe(this.guid, this.forceUpdate.bind(this));
+      this.subscribed.add(obj);
+    }
   },
 
   getInitialState: function() {
@@ -86,13 +95,33 @@ var DblbookSubscribeMixin = {
     return {}
   },
 
-  // Called right before the component updates.  We clear all existing
-  // subscriptions, so that only ones that are "renewed" in render() are
-  // kept.
-  componentWillUpdate: function() { this.unsubscribeAll(); },
+  // These are called before and after render(), but *not* the initial render().
+  componentWillUpdate: function() {
+    this.newSubscriberSet = new Set();
+  },
+
+  componentDidUpdate: function() {
+    // Add/remove subscriptions according to the diff between old and new
+    // subscribers.
+    var sub = setDifference(this.newSubscriberSet, this.subscribed);
+    var unsub = setDifference(this.subscribed, this.newSubscriberSet);
+    iterate(sub.values(), function (obj) {
+      obj.subscribe(this.guid, this.forceUpdate.bind(this));
+    }, this);
+    iterate(unsub.values(), function(obj) {
+      obj.unsubscribe(this.guid);
+    }, this);
+    this.subscribed = this.newSubscriberSet;
+    this.newSubscriberSet = null;
+  },
 
   // Called automatically when the component is being unmounted.
-  componentWillUnmount: function() { this.unsubscribeAll(); },
+  componentWillUnmount: function() {
+    // Unsubscribe from all.
+    var self = this;
+    iterate(this.subscribed.values(), function(obj) { obj.unsubscribe(self.guid); });
+    this.subscribed.clear();
+  },
 };
 
 /**
