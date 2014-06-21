@@ -215,8 +215,8 @@ dblbook.SortedMap.prototype.iterator = function() {
 
 /**
  * Class for representing decimal numbers losslessly (unlike binary floating
- * point).  Instances are immutable.  Takes inspiration from the "decimal"
- * module from the Python standard library.
+ * point).  Takes inspiration from the "decimal" module from the Python standard
+ * library.
  *
  * Can be constructed in two ways:
  * @param {String} value The string that should be converted to a Decimal
@@ -263,37 +263,26 @@ dblbook.Decimal = function(value, precision) {
 };
 
 /**
- * Returns an object with the same value of this but with the given precision
- * (which may either extend or truncate the previous precision).
- * @param {Number} precision The new precision to use.
- * @return {Decimal} The new value.
+ * Converts this object to the given precision (which may either extend or
+ * truncate the previous precision).
+ * @param {Number} precision The new precision.
  */
 dblbook.Decimal.prototype.toPrecision = function(precision) {
-  var value = this.value * Math.pow(10, precision - this.precision);
-  var ret = new dblbook.Decimal(Math.round(value), precision);
-  return ret;
+  this.value = this.value * Math.pow(10, precision - this.precision);
+  this.value = Math.round(this.value);
+  this.precision = precision;
 };
 
 /**
- * Returns a new object whose value is this added to "other".
+ * Adds the given Decimal to this one.
  * @param {Decimal} other The number to add to this one.
- * @return {Decimal} The sum.
  */
 dblbook.Decimal.prototype.add = function(other) {
   // Result has precision that is the max of the two input precisions.
   var precision = Math.max(this.precision, other.precision);
-  var op1 = this.toPrecision(precision);
-  var op2 = other.toPrecision(precision);
-  var ret = new dblbook.Decimal(op1.value + op2.value, precision);
-  return ret;
-};
-
-/**
- * Returns a new object that is the negation of this.
- * @return {Decimal} The negation.
- */
-dblbook.Decimal.prototype.neg = function() {
-  return new dblbook.Decimal(-this.value, this.precision);
+  this.toPrecision(precision);
+  var otherValue = other.value * Math.pow(10, precision - other.precision);
+  this.value += Math.round(otherValue);
 };
 
 /**
@@ -302,7 +291,15 @@ dblbook.Decimal.prototype.neg = function() {
  * @return {Decimal} The difference.
  */
 dblbook.Decimal.prototype.sub = function(other) {
-  return this.add(other.neg());
+  // Result has precision that is the max of the two input precisions.
+  var precision = Math.max(this.precision, other.precision);
+  this.toPrecision(precision);
+  var otherValue = other.value * Math.pow(10, precision - other.precision);
+  this.value -= Math.round(otherValue);
+};
+
+dblbook.Decimal.prototype.dup = function() {
+  return new dblbook.Decimal(this.value, this.precision);
 };
 
 /**
@@ -343,35 +340,44 @@ dblbook.Balance = function(commodity, amount) {
   }
 };
 
+dblbook.Balance.prototype._apply = function(other, func) {
+  iterate(other.commodities.entries(), function(commodity, val) {
+    if (!this.commodities.has(commodity)) {
+      this.commodities.set(commodity, new dblbook.Decimal());
+    }
+
+    var amt1 = this.commodities.get(commodity);
+    var amt2 = other.commodities.get(commodity);
+
+    func.call(amt1, amt2);
+
+    if (amt1.isZero() && commodity != this.primary) {
+      this.commodities.delete(commodity);
+    }
+  }, this);
+};
+
 /**
- * Adds the given amount in the given commodity to this balance.
+ * Adds the given balance to this one.
  * @param {Balance} amount The balance to add.
  */
 dblbook.Balance.prototype.add = function(other) {
-  var ret = this.dup();
-  iterate(other.commodities.entries(), function(commodity, val) {
-    if (!ret.commodities.has(commodity)) {
-      ret.commodities.set(commodity, new dblbook.Decimal());
-    }
+  this._apply(other, dblbook.Decimal.prototype.add);
+}
 
-    var amt1 = ret.commodities.get(commodity);
-    var amt2 = other.commodities.get(commodity);
-    var sum = amt1.add(amt2);
-
-    if (sum.isZero() && commodity != ret.primary) {
-      ret.commodities.delete(commodity);
-    } else {
-      ret.commodities.set(commodity, sum);
-    }
-  });
-  return ret;
-};
+/**
+ * Subtracts the given balance from this one.
+ * @param {Balance} amount The balance to subtract.
+ */
+dblbook.Balance.prototype.sub = function(other) {
+  this._apply(other, dblbook.Decimal.prototype.sub);
+}
 
 dblbook.Balance.prototype.dup = function() {
   var self = this;
   var ret = new dblbook.Balance(this.primary);
   iterate(this.commodities.entries(), function(commodity, val) {
-    ret.commodities.set(commodity, val);
+    ret.commodities.set(commodity, val.dup());
   });
   return ret;
 };
@@ -513,15 +519,7 @@ dblbook.DB = function(idb, callback) {
   this.transactionsByTime = new dblbook.SortedMap();
   this.transactionsByGuid = new Map();
 
-  var i = 2;
-  var barrier = function() {
-    if (--i == 0) {
-      callback(self);
-    }
-  }
-
-  this._loadAccounts(barrier);
-  this._loadTransactions(barrier);
+  this._loadAccounts(callback.bind(null, this));
 }
 
 /**
@@ -546,7 +544,7 @@ dblbook.DB.prototype._loadAccounts = function(callback) {
         var account = new dblbook.Account(self, account);
       });
 
-      callback();
+      self._loadTransactions(callback);
     }
   }
 }
@@ -680,7 +678,7 @@ dblbook.DB.prototype.unbalancedAmount = function(txnData) {
     var account = this.accountsByGuid.get(entry.account_guid);
     var amount = new dblbook.Decimal(entry.amount);
     var entryAmount = new dblbook.Balance(account.data.commodity_guid, amount);
-    unbalanced = unbalanced.add(entryAmount);
+    unbalanced.add(entryAmount);
   }
 
   if (unbalanced.isEmpty()) {
@@ -696,13 +694,11 @@ dblbook.DB.prototype.unbalancedAmount = function(txnData) {
  *
  * @return {IDBTransaction} An indexedDB transaction.
  */
-dblbook.DB.prototype._getWriteTransaction = function(stores) {
-  // TODO: take "stores" into account.
-
+dblbook.DB.prototype._getWriteTransaction = function() {
   var self = this;
 
   if (!this.txn) {
-    this.txn = this.idb.transaction(stores, "readwrite");
+    this.txn = this.idb.transaction(["accounts", "transactions"], "readwrite");
 
     this.txn.onerror = function(event) {
       console.log("Whoa, did not see that coming.", event);
@@ -729,7 +725,7 @@ dblbook.DB.prototype._getWriteTransaction = function(stores) {
  */
 dblbook.DB.prototype.createAccount = function(accountData) {
   var ret = new dblbook.Account(this, accountData);
-  var txn = this._getWriteTransaction(["accounts"]);
+  var txn = this._getWriteTransaction();
   txn.objectStore("accounts").add(accountData);
   return ret;
 }
@@ -741,7 +737,10 @@ dblbook.DB.prototype.createAccount = function(accountData) {
  * @param {Transaction} transaction The transaction to add.
  */
 dblbook.DB.prototype.createTransaction = function(transactionData) {
-  return new dblbook.Transaction(this, transactionData);
+  var ret = new dblbook.Transaction(this, transactionData);
+  var txn = this._getWriteTransaction();
+  txn.objectStore("transactions").add(transactionData);
+  return ret;
 }
 
 /**
@@ -911,7 +910,7 @@ dblbook.Account.prototype.update = function(newData) {
 
   this.data = newData;
 
-  var txn = this.db._getWriteTransaction(["accounts"]);
+  var txn = this.db._getWriteTransaction();
   txn.objectStore("accounts").put(newData);
 }
 
@@ -935,7 +934,7 @@ dblbook.Account.prototype.delete = function() {
   }
 
   this.db.accountsByGuid.delete(this.data.guid);
-  var txn = this.db._getWriteTransaction(["accounts"]);
+  var txn = this.db._getWriteTransaction();
   txn.objectStore("accounts").delete(this.data.guid);
 }
 
@@ -1038,7 +1037,7 @@ dblbook.Account.prototype._addReader = function(reader) {
 
       if (info) {
         var amount = opts.includeChildren ? info.totalAmount : info.amount;
-        balance = balance.add(amount);
+        balance.add(amount);
       }
     }, this);
 
@@ -1069,12 +1068,13 @@ dblbook.Account.prototype._onTransactionChange = function(txn) {
       if (oldInfo) {
         var oldAmount =
             opts.includeChildren ? oldInfo.totalAmount : oldInfo.amount;
+        reader.values[0].sub(oldAmount);
       }
 
       if (newInfo) {
         var newAmount =
             opts.includeChildren ? newInfo.totalAmount : newInfo.amount;
-        reader.values[0] = reader.values[0].add(newAmount);
+        reader.values[0].add(newAmount);
       }
     }
 
@@ -1235,10 +1235,10 @@ dblbook.Transaction.prototype._updateAccountInfo = function() {
         this.accountInfo.set(guid, info);
       }
 
-      info.amount = info.amount.add(new dblbook.Decimal(entry.amount));
       var amountBalance =
           new dblbook.Balance(account.data.commodity_guid, entry.amount);
-      info.totalAmount = info.totalAmount.add(amountBalance);
+      info.totalAmount.add(amountBalance);
+      info.amount.add(new dblbook.Decimal(entry.amount));
     } while ((account = account.parent) != null);
   }
 

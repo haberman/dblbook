@@ -93,24 +93,25 @@ test("decimal", function() {
   var zero = new dblbook.Decimal();
   ok(zero, "no-arg constructor");
   isTrulyZero(zero);
-  isTrulyZero(zero.neg());
-  isTrulyZero(zero.add(zero));
-  isTrulyZero(zero.add(new dblbook.Decimal()));
+  zero.add(zero);
+  isTrulyZero(zero);
+  zero.add(new dblbook.Decimal())
+  isTrulyZero(zero);
 
-  var onePtOne = new dblbook.Decimal("1.1");
-  equal(onePtOne.value, 11);
-  equal(onePtOne.precision, 1);
-  ok(!onePtOne.isZero());
+  var val = new dblbook.Decimal("1.1");
+  equal(val.value, 11);
+  equal(val.precision, 1);
+  ok(!val.isZero());
 
   var other = new dblbook.Decimal("200.02");
   equal(other.value, 20002);
   equal(other.precision, 2);
   ok(!other.isZero());
 
-  var sum = onePtOne.add(other);
-  equal(sum.value, 20112);
-  equal(sum.precision, 2);
-  ok(!sum.isZero());
+  val.add(other);
+  equal(val.value, 20112);
+  equal(val.precision, 2);
+  ok(!val.isZero());
 
   var neg = new dblbook.Decimal("-76000.007");
   equal(neg.value, -76000007);
@@ -118,7 +119,8 @@ test("decimal", function() {
   equal("-76,000.007", neg.toString());
   ok(!neg.isZero());
 
-  var sum2 = zero.add(neg);
+  var sum2 = zero.dup();
+  sum2.add(neg);
   equal(sum2.value, -76000007);
   equal(sum2.precision, 3);
   equal("-76,000.007", sum2.toString());
@@ -141,8 +143,8 @@ test("balance", function() {
   bal.add(emptyWithCurrency);
   ok(bal.isEmpty());
 
-  var bal2 = bal.add(new dblbook.Balance("USD", "5.23"));
-  equal(bal2.toString(), "$5.23");
+  bal.add(new dblbook.Balance("USD", "5.23"));
+  equal(bal.toString(), "$5.23");
 });
 
 dbtest("empty DB", function(db) {
@@ -271,10 +273,21 @@ dbtest("Change notifications", function(db) {
 dbtest("restore data from IDB", function(db) {
   // Create some data.
   var account1 = db.createAccount(act({"name":"Test"}));
+  var account2 = db.createAccount(act({"name":"Test2"}));
+  var sub =
+      db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
   ok(account1, "create account 1");
-  ok(db.createAccount(act({"name":"Test2"})), "create account 2");
-  ok(db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid})),
-     "create sub account");
+  ok(account2, "create account 2");
+  ok(sub, "create sub account");
+
+  var txn1 = db.createTransaction({
+    description: "Transaction 1",
+    timestamp: new Date().getTime(),
+    entry: [
+      {"account_guid": sub.data.guid, "amount": "1"},
+      {"account_guid": account2.data.guid, "amount": "-1"},
+    ]
+  });
 
   forget();
 
@@ -290,6 +303,15 @@ dbtest("restore data from IDB", function(db) {
     ok(a1);
     ok(a2);
     ok(sub);
+
+    var balance1 = a1.newBalanceReader()
+    var fired1 = 0;
+    balance1.subscribe(this, function() {
+      fired1++;
+    });
+
+    equal(fired1, 0);
+    equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
   });
 })
 
