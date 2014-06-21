@@ -75,6 +75,8 @@ function importGnucash2(xmlString, db, rootForNew) {
 
   var gnucashRootGuid;
 
+  console.profile();
+
   // Import accounts.
   var accounts = xml.getElementsByTagNameNS(gnc, "account");
   for (var i = 0; i < accounts.length; i++) {
@@ -132,6 +134,8 @@ function importGnucash2(xmlString, db, rootForNew) {
     console.log(newTransaction);
     db.createTransaction(newTransaction);
   }
+
+  console.profileEnd();
 }
 
 function importGnucash(event) {

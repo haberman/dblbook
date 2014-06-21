@@ -29,11 +29,9 @@ function getValueFromIterator(iter) {
   return ret;
 }
 
-/*
-
 function setTimeoutRequestAnimationFrame(cb) {
   setTimeout(cb, 1000 / 60);
-};
+}
 
 var requestAnimationFrame;
 
@@ -47,29 +45,26 @@ if (typeof window === 'undefined') {
     setTimeoutRequestAnimationFrame;
 }
 
-function tick() {
-  ReactUpdates.flushBatchedUpdates();
-  requestAnimationFrame(tick);
+var nbsp = String.fromCharCode(160)
+
+var changedSet = new Set();
+var redrawScheduled = false;
+
+var onRedraw = function() {
+  iterate(changedSet.values(), function (val) {
+    val.forceUpdate();
+  });
+  redrawScheduled = false;
+  changedSet.clear();
 }
 
-var ReactRAFBatchingStrategy = {
-  isBatchingUpdates: true,
-
-  /**
-   * Call the provided function in a context within which calls to `setState`
-   * and friends are batched such that components aren't updated unnecessarily.
-   * /
-  batchedUpdates: function(callback, param) {
-    callback(param);
+var onChange = function() {
+  changedSet.add(this);
+  if (!redrawScheduled) {
+    requestAnimationFrame(onRedraw);
+    redrawScheduled = true;
   }
-};
-
-requestAnimationFrame(tick);
-
-ReactUpdates.injection.injectBatchingStrategy(ReactRAFBatchingStrategy);
-*/
-
-var nbsp = String.fromCharCode(160)
+}
 
 /**
  * A convenience mixin for subscribing to change events on the DB.
@@ -85,7 +80,7 @@ var DblbookSubscribeMixin = {
     if (this.newSubscriberSet) {
       this.newSubscriberSet.add(obj);
     } else {
-      obj.subscribe(this.guid, this.forceUpdate.bind(this));
+      obj.subscribe(this.guid, onChange.bind(this));
       this.subscribed.add(obj);
     }
   },
@@ -106,7 +101,7 @@ var DblbookSubscribeMixin = {
     var sub = setDifference(this.newSubscriberSet, this.subscribed);
     var unsub = setDifference(this.subscribed, this.newSubscriberSet);
     iterate(sub.values(), function (obj) {
-      obj.subscribe(this.guid, this.forceUpdate.bind(this));
+      obj.subscribe(this.guid, onChange.bind(this));
     }, this);
     iterate(unsub.values(), function(obj) {
       obj.unsubscribe(this.guid);

@@ -323,7 +323,7 @@ dbtest("balances", function(db) {
     description: "Transaction 1",
     timestamp: new Date().getTime(),
     entry: [
-      {"account_guid": account1.data.guid, "amount": "1"},
+      {"account_guid": sub.data.guid, "amount": "1"},
       {"account_guid": account2.data.guid, "amount": "-1"},
     ]
   });
@@ -331,6 +331,17 @@ dbtest("balances", function(db) {
   ok(txn1);
   equal(fired1, 1);
   equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
+  equal(firedSub, 1);
+  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$1.00");
   equal(fired2, 1);
   equal(getValueFromIterator(balance2.iterator()).toString(), "-$1.00");
+
+  // Check readers created after transaction already exists.
+  var balanceSub2 = sub.newBalanceReader()
+  var firedSub2 = 0;
+  balanceSub2.subscribe(this, function() {
+    firedSub2++
+  });
+  equal(firedSub2, 0);
+  equal(getValueFromIterator(balanceSub2.iterator()).toString(), "$1.00");
 });

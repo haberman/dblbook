@@ -797,7 +797,7 @@ dblbook.Account = function(db, data) {
   this.data = data;
   this.parent = null;
   this.children = new dblbook.SortedMap();
-  this.dataObservers = new Set();
+  this.readers = new Set();
 
   if (!dblbook.Account.isValid(data)) {
     throw "invalid account";
@@ -970,6 +970,7 @@ dblbook.Account.prototype.delete = function() {
  */
 dblbook.Account.prototype.newBalanceReader = function(options) {
   var defaults = {
+    type: "balance",
     count: 1,
     end: new Date(),
     delta: false,
@@ -977,8 +978,10 @@ dblbook.Account.prototype.newBalanceReader = function(options) {
     includeChildren: true
   };
 
+  // TODO: validate options.
+
   var opts = merge(options, defaults);
-  return new dblbook.Reader(this, opts, this._calculateBalances);
+  return new dblbook.Reader(this, opts);
 }
 
 /**
@@ -1006,55 +1009,77 @@ dblbook.Account.prototype.newBalanceReader = function(options) {
  * keep track of those, subscribe to the contained Transactions themselves.
  */
 dblbook.Account.prototype.newTransactionReader = function(options) {
-  return new dblbook.Reader(this, options, this._getTransactions);
+  return new dblbook.Reader(this, options, this._updateTransactions);
 }
 
 /**
- * Internal-only method called whenever any data changes for this account.
- *
- * Right now we have a very coarse and inefficient method for propagating
- * changes: whenever any transaction changes for this account, we recompute
- * from scratch data for any Reader objects currently attached to the
- * account.
- *
- * There is TONS of room to optimize this.
+ * Internal-only method called when a reader gains at least one subscriber.
+ * The Reader is linked to the Account when it is created, but the Account
+ * only tracks and updates it when it has at least one subscriber.
  */
-dblbook.Account.prototype._onDataChange = function() {
-  var self = this;
-  iterate(this.dataObservers.values(), function(reader) {
-    reader._refresh();
-  });
-}
+dblbook.Account.prototype._addReader = function(reader) {
+  this.readers.add(reader);
 
-/**
- * Internal-only method for calculating a series of balances.
- */
-dblbook.Account.prototype._calculateBalances = function(options) {
-  // Starting small, this is all we support to begin.
-  if (options.frequency != "FOREVER" ||
-      options.delta ||
-      options.count != 1) {
-    throw "Unsupported configuration."
-  }
+  // Need to calculate its initial value(s).
+  var opts = reader.options;
 
-  var total = options.includeChildren ?
-      new dblbook.Balance(this.data.commodity_guid) : new dblbook.Decimal();
-  iterate(this.db.transactionsByTime.iterator(), function(key, txn) {
-    var info = txn.getAccountInfo(this.data.guid);
-
-    if (info) {
-      var amount = options.includeChildren ? info.totalAmount : info.amount;
-      total = total.add(amount);
+  if (opts.type == "balance") {
+    if (opts.frequency != "FOREVER" ||
+        opts.delta ||
+        opts.count != 1) {
+      throw "Unsupported configuration."
     }
-  }, this);
-  return [total];
+
+    var balance = opts.includeChildren ?
+        new dblbook.Balance(this.data.commodity_guid) : new dblbook.Decimal();
+
+    iterate(this.db.transactionsByTime.iterator(), function(key, txn) {
+      var info = txn.getAccountInfo(this.data.guid);
+
+      if (info) {
+        var amount = opts.includeChildren ? info.totalAmount : info.amount;
+        balance = balance.add(amount);
+      }
+    }, this);
+
+    reader.values = [balance];
+  }
 }
 
 /**
- * Internal-only method for getting a series of transactions.
+ * Internal-only method called when a reader loses its last subscriber.
+ * When this happens the Account will stop tracking and updating this reader.
  */
-dblbook.Account.prototype._getTransactions = function(options) {
-  return ["$1000"]
+dblbook.Account.prototype._removeReader = function(reader) {
+  this.readers.delete(reader);
+}
+
+/**
+ * Internal-only method called when a transaction for this account changes.
+ */
+dblbook.Account.prototype._onTransactionChange = function(txn) {
+  var self = this;
+  iterate(this.readers.values(), function(reader) {
+    var opts = reader.options;
+
+    if (opts.type == "balance") {
+      var oldInfo = txn.getOldAccountInfo(this.data.guid);
+      var newInfo = txn.getAccountInfo(this.data.guid);
+
+      if (oldInfo) {
+        var oldAmount =
+            opts.includeChildren ? oldInfo.totalAmount : oldInfo.amount;
+      }
+
+      if (newInfo) {
+        var newAmount =
+            opts.includeChildren ? newInfo.totalAmount : newInfo.amount;
+        reader.values[0] = reader.values[0].add(newAmount);
+      }
+    }
+
+    reader._notifyChange();
+  }, this);
 }
 
 /** dblbook.Transaction *******************************************************/
@@ -1088,6 +1113,7 @@ dblbook.Transaction = function(db, txnData) {
 
   this.db.transactionsByGuid.set(txnData.guid, this);
   this.db.transactionsByTime.add(this._byTimeKey(), this);
+  this.accountInfo = new Map();
   this._updateAccountInfo();
 }
 
@@ -1141,6 +1167,13 @@ dblbook.Transaction.prototype.getAccountInfo = function(accountGuid) {
 }
 
 /**
+ * Returns the previous account info for this account, or null if not.
+ */
+dblbook.Transaction.prototype.getOldAccountInfo = function(accountGuid) {
+  return this.oldAccountInfo.get(accountGuid);
+}
+
+/**
  * Updates an existing transaction.  Transaction guid must be set, and the
  * transaction must be valid.  This will completely overwrite the previous
  * value of this transaction.
@@ -1169,6 +1202,7 @@ dblbook.Transaction.prototype.delete = function() {
 dblbook.Transaction.prototype._updateAccountInfo = function() {
   // Create new accountInfo for all accounts in the transaction (and their
   // parents).
+  this.oldAccountInfo = this.accountInfo;
   this.accountInfo = new Map();
 
   for (var i in this.data.entry) {
@@ -1211,7 +1245,7 @@ dblbook.Transaction.prototype._updateAccountInfo = function() {
   // Triggers updates (and notifications) to any time series or transaction
   // reader objects.
   iterate(this.accountInfo.keys(), function(guid) {
-    this.db.getAccountByGuid(guid)._onDataChange();
+    this.db.getAccountByGuid(guid)._onTransactionChange(this);
   }, this);
 
   // Triggers notifications to any objects watching the transaction itself.
@@ -1253,7 +1287,6 @@ dblbook.Reader = function(account, options, calculate) {
   dblbook.Observable.call(this);
   this.account = account;
   this.options = options;
-  this.calculate = calculate;
 }
 
 // Reader extends Observable.
@@ -1275,17 +1308,11 @@ dblbook.Reader.prototype.iterator = function() {
 }
 
 dblbook.Reader.prototype._notifyHasSubscribers = function() {
-  this._refresh();
-  this.account.dataObservers.add(this);
+  this.account._addReader(this);
 }
 
 dblbook.Reader.prototype._notifyNoSubscribers = function() {
-  this.account.dataObservers.delete(this);
-}
-
-dblbook.Reader.prototype._refresh = function() {
-  this.values = this.calculate.call(this.account, this.options);
-  this._notifyChange();
+  this.account._removeReader(this);
 }
 
 /** dblbook.ReaderIterator ****************************************************/
