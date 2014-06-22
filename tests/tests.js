@@ -352,10 +352,10 @@ dbtest("balances", function(db) {
 
   ok(txn1);
   equal(fired1, 1);
-  equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
   equal(firedSub, 1);
-  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$1.00");
   equal(fired2, 1);
+  equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
+  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$1.00");
   equal(getValueFromIterator(balance2.iterator()).toString(), "-$1.00");
 
   // Check readers created after transaction already exists.
@@ -366,4 +366,31 @@ dbtest("balances", function(db) {
   });
   equal(firedSub2, 0);
   equal(getValueFromIterator(balanceSub2.iterator()).toString(), "$1.00");
+
+  // Update transaction and observe changes.
+  txn1.update({
+    description: "Transaction 1",
+    timestamp: new Date().getTime(),
+    entry: [
+      {"account_guid": account1.data.guid, "amount": "2.50"},
+      {"account_guid": account2.data.guid, "amount": "-2.50"},
+    ]
+  });
+
+  equal(fired1, 2);
+  equal(fired2, 2);
+  equal(firedSub, 2);
+  equal(firedSub2, 1);
+  equal(getValueFromIterator(balance1.iterator()).toString(), "$2.50");
+  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$0.00");
+  equal(getValueFromIterator(balance2.iterator()).toString(), "-$2.50");
+
+  txn1.delete()
+  equal(fired1, 3);
+  equal(fired2, 3);
+  equal(firedSub, 2);
+  equal(firedSub2, 1);
+  equal(getValueFromIterator(balance1.iterator()).toString(), "$0.00");
+  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$0.00");
+  equal(getValueFromIterator(balance2.iterator()).toString(), "$0.00");
 });

@@ -1180,7 +1180,37 @@ dblbook.Transaction.prototype.getOldAccountInfo = function(accountGuid) {
  *
  * @param {Transaction} transaction The new value for this transaction.
  */
-dblbook.Transaction.prototype.update = function(transactionData) {
+dblbook.Transaction.prototype.update = function(newData) {
+  if (!this.db.transactionIsValid(newData)) {
+    throw "invalid transaction";
+  }
+
+  if (newData.guid) {
+    if (newData.guid != this.data.guid) {
+      throw "Cannot change account GUID.";
+    }
+  } else {
+    // Specifying GUID in new data is not necessary.
+    // TODO: should we extend this to all properties; ie. automatically merge
+    // and remove properties with {property: null}?
+    newData.guid = this.data.guid;
+  }
+
+  var reinsert = false;
+
+  if (newData.timestamp != this.data.timestamp) {
+    this.db.transactionsByTime.delete(this._byTimeKey());
+    reinsert = true;
+  }
+
+  Object.freeze(newData);
+  this.data = newData;
+
+  if (reinsert) {
+    this.db.transactionsByTime.add(this._byTimeKey(), this);
+  }
+
+  this._updateAccountInfo();
 }
 
 /**
@@ -1189,6 +1219,16 @@ dblbook.Transaction.prototype.update = function(transactionData) {
  * @param {string} transactionGuid The guid of the transaction to delete.
  */
 dblbook.Transaction.prototype.delete = function() {
+  this.db.transactionsByTime.delete(this._byTimeKey());
+  this.db.transactionsByGuid.delete(this.data.guid);
+
+  // Not actually valid data, but will help zero out our effect on time series
+  // objects.
+  this.data = {
+    entry: []
+  };
+
+  this._updateAccountInfo();
 }
 
 /**
@@ -1205,6 +1245,11 @@ dblbook.Transaction.prototype._updateAccountInfo = function() {
   this.oldAccountInfo = this.accountInfo;
   this.accountInfo = new Map();
 
+  var affectedAccounts = new Set();
+  iterate(this.oldAccountInfo.keys(), function(guid) {
+    affectedAccounts.add(guid);
+  })
+
   for (var i in this.data.entry) {
     var entry = this.data.entry[i];
     var entryAccount = this.db.getAccountByGuid(entry.account_guid);
@@ -1215,6 +1260,8 @@ dblbook.Transaction.prototype._updateAccountInfo = function() {
       var guid = account.data.guid;
       var info = this.accountInfo.get(guid)
       var isEntryAccount = (account == entryAccount);
+
+      affectedAccounts.add(guid);
 
       if (!info) {
         info = {
@@ -1244,7 +1291,7 @@ dblbook.Transaction.prototype._updateAccountInfo = function() {
 
   // Triggers updates (and notifications) to any time series or transaction
   // reader objects.
-  iterate(this.accountInfo.keys(), function(guid) {
+  iterate(affectedAccounts.values(), function(guid) {
     this.db.getAccountByGuid(guid)._onTransactionChange(this);
   }, this);
 
