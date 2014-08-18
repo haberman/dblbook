@@ -66,6 +66,10 @@ var onChange = function() {
   }
 }
 
+chrome.identity.getAuthToken({interactive: true}, function(token) {
+  console.log("Got token: ", token);
+});
+
 /**
  * A convenience mixin for subscribing to change events on the DB.
  */

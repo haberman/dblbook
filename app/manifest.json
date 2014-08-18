@@ -1,19 +1,24 @@
 {
   "name": "Feline Funds",
   "description": "Double-entry accounting system",
-  "version": "0.1",
+  "version": "0.11",
   "manifest_version": 2,
-  "permissions": [
-    "https://secure.ingdirect.com/"
-  ],
   "app": {
     "background": {
       "scripts": ["background.js"]
     }
   },
-  // These are just stand-in icons until I can get real ones.
   "icons": {
     "16": "img/icon_16.jpg",
     "128": "img/icon_128.jpg"
+  },
+  "permissions": [
+    "identity"
+  ],
+  "oauth2": {
+      "client_id": "782456663665-jkb5fprsis1hkaalbup14bvc64eilq0g.apps.googleusercontent.com",
+      "scopes": [
+          "https://www.googleapis.com/auth/drive.file"
+      ]
   }
 }
