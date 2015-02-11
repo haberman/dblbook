@@ -575,10 +575,6 @@ dblbook.DB.prototype._loadTransactions = function(callback) {
 }
 
 /**
- * Internal-only method to load transactions; calls callback when finished.
- */
-
-/**
  * Opens the database, calling callback(db) when it is opened successfully.
  */
 dblbook.DB.open = function(callback) {
@@ -717,8 +713,8 @@ dblbook.DB.prototype._getWriteTransaction = function() {
  * Adds a new account.  Constraints:
  *
  * 1. account guid may or may not be set (one will be assigned if not).
- * 2. account must be valid.Account name and type should be set, but guid should be
- *    unset (the object will assign one appropriately).
+ * 2. account must be valid.  Account name and type must be set.  If the
+ *    parent is set, it must exist.
  * 3. the name must not be the same as any other account with this parent.
  *
  * @param accountData Data for the account to add (to match model.proto).
@@ -747,8 +743,8 @@ dblbook.DB.prototype.createTransaction = function(transactionData) {
  * Returns the root of the real account tree.
  *
  * The returned object is a dblbook.Account object, but it has no "data"
- * member.  You can retrieve its children and get a TimeSeries or Register
- * reader for it.  But you cannot update/delete it or give it any transactions.
+ * member.  You can retrieve its children and get a balance or transaction
+ * Reader for it.  But you cannot update/delete it or give it any transactions.
  *
  * @return {dblbook.Account} The root of the real account tree.
  */
@@ -760,8 +756,8 @@ dblbook.DB.prototype.getRealRoot = function() {
  * Returns the root of the nominal account tree.
  *
  * The returned object is a dblbook.Account object, but it has no "data"
- * member.  You can retrieve its children and get a TimeSeries or Register
- * reader for it.  But you cannot update/delete it or give it any transactions.
+ * member.  You can retrieve its children and get a balance or transaction
+ * Reader for it.  But you cannot update/delete it or give it any transactions.
  *
  * @return {dblbook.Account} The root of the nominal account tree.
  */
@@ -949,7 +945,7 @@ dblbook.Account.prototype.delete = function() {
  *   "count": 1,
  *
  *   // When the last point should be.
- *   "end": new Date(),
+ *   "end": new Date(),  // ie. default is now.
  *
  *   // When true, amounts indicate the *change* since the beginning of the
  *   // period, not the point-in-time balance of the account.
@@ -1314,9 +1310,9 @@ dblbook.Transaction.prototype._byTimeKey = function() {
  * A Reader is an iterable object that is kept up-to-date whenever the DB
  * changes.
  *
- * For example, if you get a Reader for a Register (ie. a series of
- * transactions), you can iterate over it as many times as you want and it will
- * always return the up-to-date values for all transactions in the domain.
+ * For example, if you get a transaction Reader, you can iterate over it as
+ * many times as you want and it will always return the up-to-date values for
+ * all transactions in the domain.
  *
  * Obtaining a reader will make the DB attempt to load the requested data, if
  * is not loaded already.  You can query the reader for whether the data is
@@ -1361,6 +1357,7 @@ dblbook.Reader.prototype._notifyHasSubscribers = function() {
 dblbook.Reader.prototype._notifyNoSubscribers = function() {
   this.account._removeReader(this);
 }
+
 
 /** dblbook.ReaderIterator ****************************************************/
 

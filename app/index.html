@@ -18,25 +18,22 @@
     </style>
 
     <!--script src="secret.js"></script-->
-    <script src="bower_components/es6-shim/es6-shim.js"></script>
-    <script src="bower_components/react/react.js"></script>
-    <script src="node_modules/bintrees/dist/rbtree.js"></script>
-    <script src="data-model.js"></script>
-    <script src="scrape.js"></script>
-    <script type="text/javascript" src="build/dblbook.js"></script>
-    <script type="text/javascript" src="importGnucash.js"></script>
-  </head>
-  <body>
-    <div class="pure-menu pure-menu-open pure-menu-horizontal pure-menu-fixed">
-      <a class="pure-menu-heading" applink="/">Feline Funds</a>
-          <!--ul id="nav">
-            <li ng-repeat="n in breadcrumbs"><a>{{n.text}}</a></li>
-          </ul-->
-    </div>
 
-    <div style="width: 40%; margin: auto">
-      <h1>Accounts</h1>
-      <div id="content"></div>
-    </div>
+    <!-- Third-party JavaScript Libraries. -->
+    <script src="bower_components/es6-shim/es6-shim.js"></script>
+    <script src="bower_components/react/react-with-addons.js"></script>
+    <script src="bower_components/react-router/dist/react-router.js"></script>
+    <script src="node_modules/bintrees/dist/rbtree.js"></script>
+
+    <!-- App code -->
+    <script src="js/data-model.js"></script>
+    <script src="js/scrape.js"></script>
+    <script src="js/importGnucash.js"></script>
+    <script src="jsx-build/dblbook.js"></script>
+    <script src="jsx-build/index.js"></script>
+  </head>
+
+  <body>
+    <!-- All code is rendered via React components in jsx/index.js -->
   </body>
 </html>

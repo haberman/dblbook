@@ -1,4 +1,3 @@
-/** @jsx React.DOM */
 
 function repeat(str, times) {
   return new Array(times + 1).join(str);
@@ -8,17 +7,6 @@ function assert(val) {
   if (!val) {
     throw "Assertion failed.";
   }
-}
-
-function setDifference(a, b) {
-  var ret = new Set();
-  iterate(a.values(), function(val) {
-    ret.add(val);
-  });
-  iterate(b.values(), function(val) {
-    ret.delete(val);
-  });
-  return ret;
 }
 
 function getValueFromIterator(iter) {
@@ -66,60 +54,78 @@ var onChange = function() {
   }
 }
 
-chrome.identity.getAuthToken({interactive: true}, function(token) {
-  console.log("Got token: ", token);
-});
+var lastSubscriberId = 0;
 
 /**
  * A convenience mixin for subscribing to change events on the DB.
  */
 var DblbookSubscribeMixin = {
-  // Components can call this on any object that can get change notifcations
-  // from the DB.  It will cause the component to be re-rendered when the
-  // object changes.
+  // Components call subscribe() on any Observable object if they want to receive
+  // a forceUpdate() call whenver the Observable object changes.
+  //
+  // subscribe() should only be called from render().  Like the rest of React,
+  // we design the subscribe() API to allow render() to be idempotent.  The
+  // component does not need to keep track of what objects it has subscribed
+  // to, and carefully avoid duplicate subscriptions.  Instead render() should
+  // always call subscribe on all objects it wants updates on.  Any previously
+  // subscribed objects will be un-subscribed if subscribe() is not called.
+  //
+  // Unsubscribing and resubscribing to an object can be expensive (subscribing
+  // is the signal to the storage layer that certain data needs to be loaded, so
+  // it can trigger reloads).  So we include a little logic to optimize the
+  // subscribe()/unsubscribe() calls, sort of like React does with the DOM.
   subscribe: function(obj) {
-    if (!this.guid) {
-      this.guid = dblbook.guid();
+    // Lazily generate an id for this component that we can use to clear our
+    // subscriptions later.
+    if (!this.subscriberId) {
+      this.subscriberId = ++lastSubscriberId;
     }
-    if (this.newSubscriberSet) {
-      this.newSubscriberSet.add(obj);
+
+    if (this.subscribedObjects.has(obj)) {
+      // We're already subscribed to this.  Ideally a component shouldn't
+      // subscribe to the same object more than once per render().
+      console.warn("Component subscribed to the same object twice", this, obj);
+    } else if (this.oldSubscribedObjects.has(obj)) {
+      // No need to subscribe; we're already subscribed from a previous render
+      // call.  But remove it from the old set so we don't clear the
+      // subscription after the render.
+      this.oldSubscribedObjects.delete(obj);
+      this.subscribedObjects.add(obj);
     } else {
-      obj.subscribe(this.guid, onChange.bind(this));
-      this.subscribed.add(obj);
+      // New subscription.
+      obj.subscribe(this.subscriberId, onChange.bind(this));
+      this.subscribedObjects.add(obj);
     }
   },
 
   getInitialState: function() {
-    this.subscribed = new Set();
+    this.subscribedObjects = new Set();
+    this.oldSubscribedObjects = new Set();
     return {}
   },
 
   // These are called before and after render(), but *not* the initial render().
   componentWillUpdate: function() {
-    this.newSubscriberSet = new Set();
+    this.oldSubscribedObjects = this.subscribedObjects;
+    this.subscribedObjects = new Set();
   },
 
   componentDidUpdate: function() {
-    // Add/remove subscriptions according to the diff between old and new
-    // subscribers.
-    var sub = setDifference(this.newSubscriberSet, this.subscribed);
-    var unsub = setDifference(this.subscribed, this.newSubscriberSet);
-    iterate(sub.values(), function (obj) {
-      obj.subscribe(this.guid, onChange.bind(this));
+    // Remove subscriptions to any elements we didn't re-subscribe to.
+    iterate(this.oldSubscribedObjects.values(), function(obj) {
+      obj.unsubscribe(this.subscriberId);
     }, this);
-    iterate(unsub.values(), function(obj) {
-      obj.unsubscribe(this.guid);
-    }, this);
-    this.subscribed = this.newSubscriberSet;
-    this.newSubscriberSet = null;
+    this.oldSubscribedObjects = null;
   },
 
   // Called automatically when the component is being unmounted.
   componentWillUnmount: function() {
     // Unsubscribe from all.
     var self = this;
-    iterate(this.subscribed.values(), function(obj) { obj.unsubscribe(self.guid); });
-    this.subscribed.clear();
+    iterate(this.subscribedObjects.values(), function(obj) {
+      obj.unsubscribe(self.guid);
+    });
+    this.subscribedObjects.clear();
   },
 };
 
@@ -174,13 +180,14 @@ var AccountList = React.createClass({
   },
 
   renderAccount: function(account, depth, expanded) {
+    var onToggle = this.onToggle.bind(this, account.data.guid);
     this.subscribe(account);
     this.children.push(
-      <Account key={account.data.guid}
-               expanded={expanded}
-               account={account}
-               depth={depth + 1}
-               ontoggle={this.onToggle.bind(this, account.data.guid)} />);
+      <AccountListElement key={account.data.guid}
+                          expanded={expanded}
+                          account={account}
+                          depth={depth + 1}
+                          ontoggle={onToggle} />);
     if (expanded) {
       this.renderChildren(account, depth + 1)
     }
@@ -215,7 +222,7 @@ var AccountList = React.createClass({
 /**
  * Component for rendering a single account.
  */
-var Account = React.createClass({
+var AccountListElement = React.createClass({
   mixins: [DblbookSubscribeMixin],
 
   // TODO: componentWillReceiveProps?
@@ -242,6 +249,7 @@ var Account = React.createClass({
 
   render: function() {
     var account = this.props.account;
+    var href = "#account/" + account.data.guid;
 
     this.subscribe(this.balance);
     this.subscribe(account);
@@ -250,7 +258,9 @@ var Account = React.createClass({
       {repeat(nbsp, this.props.depth * 4)}
       {this.renderTriangle()}
       &nbsp;&nbsp;&nbsp;
-      <a href="#">{account.data.name}</a>
+      <Link to="account" params={{guid: account.data.guid}}>
+        {account.data.name}
+      </Link>
     </span>;
 
     if (account.data.guid == "REAL_ROOT") {
@@ -266,8 +276,19 @@ var Account = React.createClass({
   }
 });
 
-dblbook.DB.open(function(db) {
-  document.db = db;
-  React.renderComponent(<AccountPage db={db} />,
-                        document.getElementById("content"));
+var Account = React.createClass({
+  mixins: [ReactRouter.State],
+  render: function() {
+    console.log(this.props.db, this.getParams());
+    var account = this.props.db.getAccountByGuid(this.getParams().guid);
+    return <div>
+      <h1>Account Details: {account.data.name}</h1>
+    </div>
+  }
+});
+
+var NotFound = React.createClass({
+  render: function() {
+    return <h1>Not found!</h1>
+  }
 });
