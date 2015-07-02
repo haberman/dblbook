@@ -6,7 +6,7 @@ function parseXml(str) {
 
 function getXmlText(node, ns, name) {
   var found = node.getElementsByTagNameNS(ns, name)[0];
-  return found ? found.innerHTML : undefined;
+  return found ? found.textContent : undefined;
 }
 
 function getXmlText2(node, ns, name, ns2, name2) {
@@ -15,11 +15,11 @@ function getXmlText2(node, ns, name, ns2, name2) {
     return undefined;
   }
   found = found.getElementsByTagNameNS(ns2, name2)[0];
-  return found ? found.innerHTML : undefined;
+  return found ? found.textContent : undefined;
 }
 
 function mapType(type) {
-  if (type == "BANK") {
+  if (type == "BANK" || type == "CASH" || type == "MUTUAL") {
     return "ASSET";
   } else if (type == "EQUITY") {
     // XXX: Treat as asset for now.

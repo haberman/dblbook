@@ -221,14 +221,18 @@ sums in the database, then:
 In both cases, those are *also* the bounds on how many sums
 need to be loaded into memory to perform the read or write!
 
-[1]: note that this is only really true if there is a
-maximum time window over which we expect users to operate.
-If a user sets up an account with `n` transactions spaced
-evenly per every 1,000 years, our biggest sums (yearly) will
-be useless and we're back to O(n) reads to read the current
-balance. But if we assume transactions will only span a
-reasonable amount of time, say 100 years, then the bound is
-realistic.
+[1]: note that this asymptotic bound isn't really true if we
+have statically-configured sum periods (like: year, month,
+day).  With only those granularities, we could easily make
+the cost to read `O(n)` by creating `n` transactions in a
+single day, or `n` transactions spread over `n` years.  Both
+of these cases would require reading `O(n)` database items
+instead of the `O(n lg n) we are looking for.  To truly
+enforce `O(n lg n)` we'd need adaptive time windows for the
+sums that react to the actual distribution of transactions
+over time.  But this would be significantly more
+complicated, so we won't go there until/unless it is
+required.
 
 ## Database Schema
 

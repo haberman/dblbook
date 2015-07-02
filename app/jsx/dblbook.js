@@ -60,8 +60,8 @@ var lastSubscriberId = 0;
  * A convenience mixin for subscribing to change events on the DB.
  */
 var DblbookSubscribeMixin = {
-  // Components call subscribe() on any Observable object if they want to receive
-  // a forceUpdate() call whenver the Observable object changes.
+  // Components call subscribe() on any Observable object if they want to
+  // receive a forceUpdate() call whenver the Observable object changes.
   //
   // subscribe() should only be called from render().  Like the rest of React,
   // we design the subscribe() API to allow render() to be idempotent.  The
@@ -276,13 +276,54 @@ var AccountListElement = React.createClass({
   }
 });
 
-var Account = React.createClass({
-  mixins: [ReactRouter.State],
+var TransactionList = React.createClass({
+  mixins: [DblbookSubscribeMixin],
+
   render: function() {
-    console.log(this.props.db, this.getParams());
-    var account = this.props.db.getAccountByGuid(this.getParams().guid);
+    this.subscribe(this.props.reader);
+    this.transactions = [];
+
+    iterate(this.props.reader.iterator(), function (txn) {
+      var info = txn.getAccountInfo(this.props.accountGuid);
+      var ts = moment(txn.data.timestamp/1000);
+      if (info) {
+        this.transactions.push(<tr key={txn.data.guid}>
+          <td>{ts.format("YYYY-MM-DD") + nbsp + ts.format("HH:mm")}</td>
+          <td>{txn.data.description}</td>
+          <td>{info.totalAmount.toString()}</td>
+          <td></td>
+        </tr>);
+      }
+    }, this);
+
+    return <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Description</th>
+          <th>Amount</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {this.transactions}
+      </tbody>
+    </table>;
+  }
+});
+
+var Account = React.createClass({
+  mixins: [ReactRouter.State, DblbookSubscribeMixin],
+  render: function() {
+    var guid = this.getParams().guid;
+    var account = this.props.db.getAccountByGuid(guid);
+    var reader = account.newTransactionReader();
+    this.subscribe(account);
     return <div>
       <h1>Account Details: {account.data.name}</h1>
+      <h1>Transaction List</h1>
+      <TransactionList accountGuid={guid} reader={reader} />
     </div>
   }
 });

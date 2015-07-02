@@ -118,14 +118,15 @@ function rootForType(type) {
 /**
  * An ES6-compatible iterator for SortedMap.
  */
-dblbook.SortedMapIterator = function(rbIter) {
+dblbook.SortedMapIterator = function(rbIter, nextFunc) {
   this.rbIter = rbIter;
+  this.nextFunc = nextFunc;
   this.done = false;
 }
 
 dblbook.SortedMapIterator.prototype.next = function() {
   var item;
-  if (this.done || (item = this.rbIter.next()) == null) {
+  if (this.done || (item = this.rbIter[this.nextFunc]()) == null) {
     this.done = true;
     return {"done": true};
   } else {
@@ -208,7 +209,14 @@ dblbook.SortedMap.prototype.get = function(key) {
  * Returns an iterator over the map's entries, in key order.
  */
 dblbook.SortedMap.prototype.iterator = function() {
-  return new dblbook.SortedMapIterator(this.tree.iterator());
+  return new dblbook.SortedMapIterator(this.tree.iterator(), "next");
+}
+
+/**
+ * Returns an iterator over the map's entries, in reverse key order.
+ */
+dblbook.SortedMap.prototype.riterator = function() {
+  return new dblbook.SortedMapIterator(this.tree.iterator(), "next");
 }
 
 /** dblbook.Decimal ***********************************************************/
@@ -1004,7 +1012,15 @@ dblbook.Account.prototype.newBalanceReader = function(options) {
  * keep track of those, subscribe to the contained Transactions themselves.
  */
 dblbook.Account.prototype.newTransactionReader = function(options) {
-  return new dblbook.Reader(this, options, this._updateTransactions);
+  var defaults = {
+    type: "transaction",
+    count: 20,
+    end: new Date(),
+    includeChildren: true
+  }
+
+  var opts = merge(options, defaults);
+  return new dblbook.Reader(this, opts);
 }
 
 /**
@@ -1038,6 +1054,14 @@ dblbook.Account.prototype._addReader = function(reader) {
     }, this);
 
     reader.values = [balance];
+  } else if (opts.type == "transaction") {
+    reader.values = [];
+    iterate(this.db.transactionsByTime.riterator(), function(key, txn) {
+      reader.values.push(txn);
+    }, this);
+    reader.values.reverse()
+  } else {
+    throw "Unknown reader type: " + opts.type;
   }
 }
 
@@ -1072,6 +1096,8 @@ dblbook.Account.prototype._onTransactionChange = function(txn) {
             opts.includeChildren ? newInfo.totalAmount : newInfo.amount;
         reader.values[0].add(newAmount);
       }
+    } else {
+      throw "Unknown reader type: " + opts.type;
     }
 
     reader._notifyChange();

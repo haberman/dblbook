@@ -8,10 +8,17 @@ var NotFoundRoute = ReactRouter.NotFoundRoute;
 var App = React.createClass({
   render: function () {
     return <div id="top">
-      <h1>Hello, ReactRouter world!</h1>
+      <h1>Feline Funds</h1>
+      <div>
+        <ul>
+          <Link to="accounts">Accounts</Link>
+        </ul>
+      </div>
 
-      {/* Render sub-component for this route. */}
-      <RouteHandler db={this.props.db}/>
+      <div>
+        {/* Render sub-component for this route. */}
+        <RouteHandler db={this.props.db}/>
+      </div>
     </div>
   }
 });
@@ -19,7 +26,7 @@ var App = React.createClass({
 var routes = (
   <Route handler={App}>
     <Route name="account" path="/accounts/:guid" handler={Account}/>
-    <DefaultRoute handler={AccountPage}/>
+    <DefaultRoute name="accounts" handler={AccountPage}/>
     <NotFoundRoute handler={NotFound}/>
   </Route>
 );

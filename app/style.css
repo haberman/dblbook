@@ -14,6 +14,10 @@
    user-select: none;
 }
 
+html, body {
+  overflow-y:scroll;
+}
+
 a:hover {
   cursor: pointer;
 }
