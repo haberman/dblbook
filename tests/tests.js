@@ -1,7 +1,7 @@
 // Makes the database forget that one has been previously constructed, to work
 // around the code that enforces singleton.  This is necessary for tests where
 // we want to verify that the DB was persisted correctly.
-function forget() { dblbook.DB.singleton = undefined; }
+function forget() { dataModel.DB.singleton = undefined; }
 
 // Add account defaults.
 var act = function(data) {
@@ -17,10 +17,15 @@ var act = function(data) {
 
 function runTestWithDb(func) {
   stop();
-  dblbook.DB.open(function(db) {
-    ok(db instanceof dblbook.DB, "created object is DB");
+  dataModel.DB.open().then(function(db) {
+    console.log(db);
+    ok(db instanceof dataModel.DB, "created object is DB");
     func(db);
     db.close();
+    start();
+  }, function(error) {
+    console.log(error);
+    ok(false);
     start();
   });
 }
@@ -38,7 +43,7 @@ function dbtest(name, func) {
     stop();
 
     // First delete the entire indexeddb.
-    dblbook.DB.delete(function() {
+    dataModel.DB.delete(function() {
       // Next open a fresh DB from scratch.
       forget();
       runTestWithDb(func);
@@ -48,7 +53,7 @@ function dbtest(name, func) {
 }
 
 dbtest("transaction validity", function(db) {
-  ok(!dblbook.Transaction.isValid({}), "invalid txn 1");
+  ok(!dataModel.Transaction.isValid({}), "invalid txn 1");
 
   var account1 = db.createAccount(act({"name":"Test2"}));
   var account2 = db.createAccount(act({"name":"Test"}));
@@ -78,8 +83,8 @@ dbtest("transaction validity", function(db) {
 });
 
 test("account validity", function() {
-  ok(!dblbook.Account.isValid({}), "invalid account 1");
-  ok(dblbook.Account.isValid({
+  ok(!dataModel.Account.isValid({}), "invalid account 1");
+  ok(dataModel.Account.isValid({
     "name":"Test", "type": "ASSET", "commodity_guid": "USD"
   }), "valid account 1");
 });
@@ -90,20 +95,20 @@ test("decimal", function() {
     ok(zero.toString() == "0", "zero value has 0 representation");
   }
 
-  var zero = new dblbook.Decimal();
+  var zero = new dataModel.Decimal();
   ok(zero, "no-arg constructor");
   isTrulyZero(zero);
   zero.add(zero);
   isTrulyZero(zero);
-  zero.add(new dblbook.Decimal())
+  zero.add(new dataModel.Decimal())
   isTrulyZero(zero);
 
-  var val = new dblbook.Decimal("1.1");
+  var val = new dataModel.Decimal("1.1");
   equal(val.value, 11);
   equal(val.precision, 1);
   ok(!val.isZero());
 
-  var other = new dblbook.Decimal("200.02");
+  var other = new dataModel.Decimal("200.02");
   equal(other.value, 20002);
   equal(other.precision, 2);
   ok(!other.isZero());
@@ -113,7 +118,7 @@ test("decimal", function() {
   equal(val.precision, 2);
   ok(!val.isZero());
 
-  var neg = new dblbook.Decimal("-76000.007");
+  var neg = new dataModel.Decimal("-76000.007");
   equal(neg.value, -76000007);
   equal(neg.precision, 3);
   equal("-76,000.007", neg.toString());
@@ -128,22 +133,22 @@ test("decimal", function() {
 });
 
 test("balance", function() {
-  var empty = new dblbook.Balance();
+  var empty = new dataModel.Balance();
   ok(empty.isEmpty());
   equal(empty.toString(), "");
 
-  var emptyWithCurrency = new dblbook.Balance("USD");
+  var emptyWithCurrency = new dataModel.Balance("USD");
   ok(emptyWithCurrency.isEmpty());
   equal(emptyWithCurrency.toString(), "$0.00");
 
-  var bal = new dblbook.Balance();
-  bal.add(new dblbook.Balance());
+  var bal = new dataModel.Balance();
+  bal.add(new dataModel.Balance());
   ok(bal.isEmpty());
 
   bal.add(emptyWithCurrency);
   ok(bal.isEmpty());
 
-  bal.add(new dblbook.Balance("USD", "5.23"));
+  bal.add(new dataModel.Balance("USD", "5.23"));
   equal(bal.toString(), "$5.23");
 });
 
@@ -153,10 +158,17 @@ dbtest("empty DB", function(db) {
 });
 
 dbtest("multiple DBs not allowed", function() {
-  dblbook.DB.open(function(db, msg) {
-    ok(db == null);
+  var err = false;
+  try {
+    dataModel.DB.open().then(function(db) {
+      ok(false);
+      start();
+    }, function() {
+      err = true;
+    });
+  } catch (e) {
     start();
-  });
+  }
   stop();
 });
 
@@ -292,7 +304,7 @@ dbtest("restore data from IDB", function(db) {
   forget();
 
   runTestWithDb(function(db2) {
-    ok(db2 instanceof dblbook.DB, "created object is DB");
+    ok(db2 instanceof dataModel.DB, "created object is DB");
     var root = db2.getRealRoot();
     equal(2, root.children.size);
 

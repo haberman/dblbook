@@ -9,6 +9,26 @@ function assert(val) {
   }
 }
 
+// Iterates over a ES6-style iterator.
+function iterate(iter, func, funcThis) {
+  while (1) {
+    var v = iter.next();
+    if (v.done) {
+      return;
+    }
+
+    var val = v.value;
+
+    if (val instanceof Array) {
+      // iterate(map.entries(), function(key, val) {});
+      func.apply(funcThis, val);
+    } else {
+      // iterate(map.values(), function(val) {});
+      func.call(funcThis, val);
+    }
+  }
+}
+
 function getValueFromIterator(iter) {
   var pair = iter.next();
   assert(!pair.done);

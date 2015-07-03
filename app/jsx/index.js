@@ -32,7 +32,7 @@ var routes = (
 );
 
 // Load the global database, then display the initial route once it's loaded.
-dblbook.DB.open(function(db) {
+dataModel.DB.open().then(function(db) {
   // Gnucash importer doesn't yet have a proper way to get this.
   document.db = db;
 
