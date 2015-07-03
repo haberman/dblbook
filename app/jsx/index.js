@@ -1,9 +1,9 @@
 
-var DefaultRoute = ReactRouter.DefaultRoute;
-var Link = ReactRouter.Link;
-var Route = ReactRouter.Route;
-var RouteHandler = ReactRouter.RouteHandler;
-var NotFoundRoute = ReactRouter.NotFoundRoute;
+import * as dblbook from 'dblbook';
+import * as React from 'react';
+import * as dataModel from 'data-model';
+import { DefaultRoute, Link, Route, RouteHandler, NotFoundRoute } from 'react-router';
+import * as ReactRouter from 'react-router';
 
 var App = React.createClass({
   render: function () {
@@ -25,9 +25,9 @@ var App = React.createClass({
 
 var routes = (
   <Route handler={App}>
-    <Route name="account" path="/accounts/:guid" handler={Account}/>
-    <DefaultRoute name="accounts" handler={AccountPage}/>
-    <NotFoundRoute handler={NotFound}/>
+    <Route name="account" path="/accounts/:guid" handler={dblbook.Account}/>
+    <DefaultRoute name="accounts" handler={dblbook.AccountPage}/>
+    <NotFoundRoute handler={dblbook.NotFound}/>
   </Route>
 );
 
@@ -39,10 +39,6 @@ dataModel.DB.open().then(function(db) {
   ReactRouter.run(routes, function(Handler) {
     React.render(<Handler db={db} />, document.body);
   });
-});
-
-React.addons.batchedUpdates(function() {
-  console.log("Maybe this works after all!");
 });
 
 /*

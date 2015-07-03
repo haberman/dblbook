@@ -5,7 +5,7 @@
   "manifest_version": 2,
   "app": {
     "background": {
-      "scripts": ["js/background.js"]
+      "scripts": ["jsx/background.js"]
     }
   },
   "icons": {

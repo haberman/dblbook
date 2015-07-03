@@ -1,0 +1,21 @@
+{
+  "name": "dblbook",
+  "version": "0.0.0",
+  "homepage": "https://github.com/haberman/dblbook",
+  "authors": [
+    "Josh Haberman <jhaberman@gmail.com>"
+  ],
+  "description": "A double-entry accounting app.",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "fontawesome": "~4.3.0",
+    "pure": "~0.5.0",
+    "qunit": "~1.17.1",
+  }
+}

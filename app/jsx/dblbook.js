@@ -1,4 +1,13 @@
 
+import * as React from 'react';
+import * as ReactRouter from 'react-router';
+import { Link } from 'react-router';
+import { importGnucash } from 'importGnucash';
+//import { fn } from 'moment';
+
+//var moment = fn;
+//cmnsole.log(moment);
+
 function repeat(str, times) {
   return new Array(times + 1).join(str);
 }
@@ -59,9 +68,9 @@ var changedSet = new Set();
 var redrawScheduled = false;
 
 var onRedraw = function() {
-  iterate(changedSet.values(), function (val) {
+  for (let val of changedSet.values()) {
     val.forceUpdate();
-  });
+  }
   redrawScheduled = false;
   changedSet.clear();
 }
@@ -132,9 +141,9 @@ var DblbookSubscribeMixin = {
 
   componentDidUpdate: function() {
     // Remove subscriptions to any elements we didn't re-subscribe to.
-    iterate(this.oldSubscribedObjects.values(), function(obj) {
+    for (let obj of this.oldSubscribedObjects.values()) {
       obj.unsubscribe(this.subscriberId);
-    }, this);
+    }
     this.oldSubscribedObjects = null;
   },
 
@@ -142,9 +151,9 @@ var DblbookSubscribeMixin = {
   componentWillUnmount: function() {
     // Unsubscribe from all.
     var self = this;
-    iterate(this.subscribedObjects.values(), function(obj) {
+    for (let obj of this.subscribedObjects.values()) {
       obj.unsubscribe(self.guid);
-    });
+    }
     this.subscribedObjects.clear();
   },
 };
@@ -152,7 +161,7 @@ var DblbookSubscribeMixin = {
 /**
  * Component for rendering the accounts page.
  */
-var AccountPage = React.createClass({
+export var AccountPage = React.createClass({
   mixins: [DblbookSubscribeMixin],
 
   render: function() {
@@ -214,9 +223,9 @@ var AccountList = React.createClass({
   },
 
   renderChildren: function(account, depth) {
-    iterate(account.children.iterator(), function(name, child) {
+    for (let [name, child] of account.children.iterator()) {
       this.renderAccount(child, depth, this.state[child.data.guid]);
-    }, this);
+    }
   },
 
   render: function() {
@@ -303,18 +312,20 @@ var TransactionList = React.createClass({
     this.subscribe(this.props.reader);
     this.transactions = [];
 
-    iterate(this.props.reader.iterator(), function (txn) {
+    for (let txn of this.props.reader.iterator()) {
       var info = txn.getAccountInfo(this.props.accountGuid);
-      var ts = moment(txn.data.timestamp/1000);
+      //var ts = moment(txn.data.timestamp/1000);
+      var ts = txn.data.timestamp;
+      // <td>{ts.format("YYYY-MM-DD") + nbsp + ts.format("HH:mm")}</td>
       if (info) {
         this.transactions.push(<tr key={txn.data.guid}>
-          <td>{ts.format("YYYY-MM-DD") + nbsp + ts.format("HH:mm")}</td>
+          <td>{ts}</td>
           <td>{txn.data.description}</td>
           <td>{info.totalAmount.toString()}</td>
           <td></td>
         </tr>);
       }
-    }, this);
+    }
 
     return <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
       <thead>
@@ -333,7 +344,7 @@ var TransactionList = React.createClass({
   }
 });
 
-var Account = React.createClass({
+export var Account = React.createClass({
   mixins: [ReactRouter.State, DblbookSubscribeMixin],
   render: function() {
     var guid = this.getParams().guid;
