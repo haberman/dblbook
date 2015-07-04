@@ -491,22 +491,26 @@ export class DB {
     this.idb = idb;
 
     this.accountsByGuid = new Map();
-    this.accountsByGuid.set("REAL_ROOT", new Account(this, {
-      "name": "Real Root Account (internal)",
-      "guid": "REAL_ROOT",
-      "type": "ASSET",
-      "commodity_guid": "USD"
-    }));
-    this.accountsByGuid.set("NOMINAL_ROOT", new Account(this, {
-      "name": "Nominal Root Account (internal)",
-      "guid": "NOMINAL_ROOT",
-      "type": "INCOME",
-      "commodity_guid": "USD"
-    }));
 
     // Key is [decimal usec][guid].
     this.transactionsByTime = new SortedMap();
     this.transactionsByGuid = new Map();
+
+    // Add the two root accounts -- these are currently special-cased and
+    // not actually stored in the DB (should probably fix this).
+    new Account(this, {
+      "name": "Real Root Account (internal)",
+      "guid": "REAL_ROOT",
+      "type": "ASSET",
+      "commodity_guid": "USD"
+    });
+
+    new Account(this, {
+      "name": "Nominal Root Account (internal)",
+      "guid": "NOMINAL_ROOT",
+      "type": "INCOME",
+      "commodity_guid": "USD"
+    });
   }
 
   /**
