@@ -1,5 +1,6 @@
-// This is a logical data model for the application, but isn't actually used
-// anywhere (yet).
+// This just serves as documentation right now.
+// This file is not actually read by any software at the
+// moment.
 
 message Account {
   required string guid = 1;

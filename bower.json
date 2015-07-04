@@ -16,6 +16,6 @@
   "dependencies": {
     "fontawesome": "~4.3.0",
     "pure": "~0.5.0",
-    "qunit": "~1.17.1",
+    "qunit": "~1.17.1"
   }
 }
