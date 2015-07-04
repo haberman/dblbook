@@ -534,7 +534,6 @@ export class DB {
           store.createIndex("time_order", "timestamp")
 
           store = idb.createObjectStore("accounts", {keyPath: "guid"});
-          console.log("ObjectStores created");
           initialized = true;
         }
 
@@ -568,7 +567,6 @@ export class DB {
       return new Promise(function(resolve, reject) {
         // Load accounts.
 
-        console.log("LoadAccounts");
         let txn = db.idb.transaction("accounts", "readonly");
         let accounts = []
 

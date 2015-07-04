@@ -156,8 +156,6 @@ qunit.test("balance", function() {
 });
 
 dbtest("empty DB", function(db) {
-  console.log("Empty DB test");
-  console.log("Empty DB test!!");
   qunit.ok(db.getRealRoot().children.size == 0, "empty db has no accounts");
   qunit.ok(db.getNominalRoot().children.size == 0, "empty db has no accounts");
 });
