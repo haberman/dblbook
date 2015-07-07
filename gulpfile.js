@@ -56,11 +56,10 @@ gulp.task("default", function(callback) {
         'bower_components/pure/pure-min.css',])
         .pipe(gulp.dest('build'));
 
+    // TODO: Clean this up, the entire tree of SASS etc. isn't required
+    // in the output
     gulp.src('bower_components/fontawesome/**/*')
         .pipe(gulp.dest('build/fontawesome'));
-
-    gulp.src('app/img/*')
-        .pipe(gulp.dest('build/img'));
 
     gulp.src('app/*.html')
         .pipe(gulp.dest('build'));
