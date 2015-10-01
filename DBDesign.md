@@ -332,7 +332,8 @@ Each object follows the `Account` schema in `model.proto`.
 
 It is assumed that the list of accounts can be reasonably
 loaded into memory, so no thought is given for trying to
-avoid that.
+avoid that.  The implementation loads all accounts when
+a DB object is created.
 
 ### ObjectStore: Transactions
 
@@ -349,21 +350,36 @@ transactions from a specific time window, so this should be
 efficient. The unique index on `guid`  supports efficient
 lookup by guid and prevents duplicates.
 
+One possible scaling challenge here is that you can't load
+transactions for only a leaf account (or intermediate
+account).  So to show transactions for an extremely sparse
+leaf account, you have to load far more transactions than
+will be displayed.  For leaf accounts this could be solved
+with a (`account`, `timestamp`) index.  This could be a
+useful addition, though it wouldn't solve the problem for
+intermediate accounts.
+
 ### ObjectStore: Sums
 
-* **primary key:** sum_key (see below)
+* **primary key:** `sum_key` (see below)
 
 Each object is simply a balance (a bunch of amounts in one
 or more currencies) representing the sum of all entry
 amounts for this time window.
 
-The `sum_key` is a combination of (account_guid,
-granularity, timestamp), in that order. For example,
+The `sum_key` is a combination of (`account_guid`,
+`granularity`, `timestamp`), in that order. For example,
 (CheckingAccountGuid, MONTHLY, 2015-03) would represent the
 monthly rollup for the checking account in March 2015. This
 ordering makes it efficient to read a range of sums for a
 given account and granularity, which is an operation
 required by several common operations.
+
+For now we assume that all sums will be loaded at all times.
+The DB object will load them when it is created.  This
+simplifies the implementation a lot, but if this becomes
+an issue at some point this could be changed to use lazy
+loading.
 
 ## Update Algorithm
 

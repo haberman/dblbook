@@ -35,9 +35,14 @@ var webpackConfig = {
         ]
     },
     devtool: "#inline-source-map",
-    // Uncomment to uglify.
+    // Uncomment to uglify with production config.
     //plugins: [
-    //  new webpack.optimize.UglifyJsPlugin({minimize: true})
+    //  new webpack.optimize.UglifyJsPlugin({minimize: true}),
+    //  new webpack.DefinePlugin({
+    //    'process.env': {
+    //      'NODE_ENV': '"production"'
+    //    }
+    //  })
     //],
 };
 

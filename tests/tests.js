@@ -1,11 +1,11 @@
 
-import * as dataModel from 'data-model';
+import * as model from 'model';
 import * as qunit from 'qunit';
 
 // Makes the database forget that one has been previously constructed, to work
 // around the code that enforces singleton.  This is necessary for tests where
 // we want to verify that the DB was persisted correctly.
-function forget() { dataModel.DB.singleton = undefined; }
+function forget() { model.DB.singleton = undefined; }
 
 // Add account defaults.
 var act = function(data) {
@@ -21,8 +21,8 @@ var act = function(data) {
 
 function runTestWithDb(func, assert) {
   var done = assert.async();
-  dataModel.DB.open().then(function(db) {
-    qunit.ok(db instanceof dataModel.DB, "created object is DB");
+  model.DB.open().then(function(db) {
+    qunit.ok(db instanceof model.DB, "created object is DB");
     func(db, assert);
     db.close();
     done();
@@ -33,12 +33,25 @@ function runTestWithDb(func, assert) {
   });
 }
 
-function getValueFromIterator(iter) {
-  var pair = iter.next();
-  qunit.ok(!pair.done);
-  var ret = pair.value;
-  qunit.ok(iter.next().done);
-  return ret;
+function arrayFrom(iter) {
+  var ret = [];
+  while (1) {
+    var v = iter.next();
+    if (v.done) {
+      return ret;
+    }
+    ret.push(v.value);
+  }
+}
+
+function getSingleArrayValue(array) {
+  qunit.equal(array.length, 1, "Array has exactly one element");
+  return array[0];
+}
+
+function assertPointIsZero(point) {
+  qunit.ok(point.start_balance.isZero());
+  qunit.ok(point.end_balance.isZero());
 }
 
 function dbtest(name, func) {
@@ -46,7 +59,7 @@ function dbtest(name, func) {
     var done = assert.async();
 
     // First delete the entire indexeddb.
-    dataModel.DB.delete().then(function() {
+    model.DB.delete().then(function() {
       // Next open a fresh DB from scratch.
       forget();
       runTestWithDb(func, assert);
@@ -56,7 +69,7 @@ function dbtest(name, func) {
 }
 
 dbtest("transaction validity", function(db) {
-  qunit.ok(!dataModel.Transaction.isValid({}), "invalid txn 1");
+  qunit.ok(!model.Transaction.isValid({}), "invalid txn 1");
 
   var account1 = db.createAccount(act({"name":"Test2"}));
   var account2 = db.createAccount(act({"name":"Test"}));
@@ -67,92 +80,38 @@ dbtest("transaction validity", function(db) {
   var guid2 = account2.data.guid;
 
   qunit.ok(db.transactionIsValid({
-    "timestamp": 12345,
+    "date": "2015-09-23",
     "description": "Foo Description",
     "entry": [
-      {"account_guid": guid1, "amount": "1"},
-      {"account_guid": guid2, "amount": "-1"},
+      {"account_guid": guid1, "amount": {"USD":"1.00"}},
+      {"account_guid": guid2, "amount": {"USD":"-1.00"}},
     ]
   }), "valid txn 1");
 
   qunit.ok(!db.transactionIsValid({
-    "timestamp": 12345,
+    "date": "2015-09-23",
     "description": "Foo Description",
     "entry": [
-      {"account_guid": guid1, "amount": "1"},
-      {"account_guid": guid2, "amount": "1"},
+      {"account_guid": guid1, "amount": {"USD":"1.00"}},
+      {"account_guid": guid2, "amount": {"USD":"1.00"}},
     ]
   }), "nonbalancing txn invalid");
+
+  qunit.ok(!db.transactionIsValid({
+    "date": "2015-09-23",
+    "description": "Foo Description",
+    "entry": [
+      {"account_guid": guid1, "amount": {"USD":"1.00"}},
+      {"account_guid": guid2, "amount": {"EUR":"-1.00"}},
+    ]
+  }), "nonbalancing txn invalid 2");
 });
 
 qunit.test("account validity", function() {
-  qunit.ok(!dataModel.Account.isValid({}), "invalid account 1");
-  qunit.ok(dataModel.Account.isValid({
+  qunit.ok(!model.Account.isValid({}), "invalid account 1");
+  qunit.ok(model.Account.isValid({
     "name":"Test", "type": "ASSET", "commodity_guid": "USD"
   }), "valid account 1");
-});
-
-qunit.test("decimal", function() {
-  var isTrulyZero = function(zero) {
-    qunit.ok(zero.isZero(), "zero value isZero()");
-    qunit.ok(zero.toString() == "0", "zero value has 0 representation");
-  }
-
-  var zero = new dataModel.Decimal();
-  qunit.ok(zero, "no-arg constructor");
-  isTrulyZero(zero);
-  zero.add(zero);
-  isTrulyZero(zero);
-  zero.add(new dataModel.Decimal())
-  isTrulyZero(zero);
-
-  var val = new dataModel.Decimal("1.1");
-  equal(val.value, 11);
-  equal(val.precision, 1);
-  qunit.ok(!val.isZero());
-
-  var other = new dataModel.Decimal("200.02");
-  equal(other.value, 20002);
-  equal(other.precision, 2);
-  qunit.ok(!other.isZero());
-
-  val.add(other);
-  equal(val.value, 20112);
-  equal(val.precision, 2);
-  qunit.ok(!val.isZero());
-
-  var neg = new dataModel.Decimal("-76000.007");
-  equal(neg.value, -76000007);
-  equal(neg.precision, 3);
-  equal("-76,000.007", neg.toString());
-  qunit.ok(!neg.isZero());
-
-  var sum2 = zero.dup();
-  sum2.add(neg);
-  equal(sum2.value, -76000007);
-  equal(sum2.precision, 3);
-  equal("-76,000.007", sum2.toString());
-  qunit.ok(!sum2.isZero());
-});
-
-qunit.test("balance", function() {
-  var empty = new dataModel.Balance();
-  qunit.ok(empty.isEmpty());
-  equal(empty.toString(), "");
-
-  var emptyWithCurrency = new dataModel.Balance("USD");
-  qunit.ok(emptyWithCurrency.isEmpty());
-  equal(emptyWithCurrency.toString(), "$0.00");
-
-  var bal = new dataModel.Balance();
-  bal.add(new dataModel.Balance());
-  qunit.ok(bal.isEmpty());
-
-  bal.add(emptyWithCurrency);
-  qunit.ok(bal.isEmpty());
-
-  bal.add(new dataModel.Balance("USD", "5.23"));
-  equal(bal.toString(), "$5.23");
 });
 
 dbtest("empty DB", function(db) {
@@ -164,7 +123,7 @@ dbtest("multiple DBs not allowed", function(db, assert) {
   var err = false;
   var done = assert.async();
   try {
-    dataModel.DB.open().then(function(db) {
+    model.DB.open().then(function(db) {
       qunit.ok(false);
       done();
     }, function() {
@@ -297,17 +256,17 @@ dbtest("restore data from IDB", function(db, assert) {
 
   db.createTransaction({
     description: "Transaction 1",
-    timestamp: new Date().getTime(),
+    date: "2015-09-23",
     entry: [
-      {"account_guid": sub.data.guid, "amount": "1"},
-      {"account_guid": account2.data.guid, "amount": "-1"},
+      {"account_guid": sub.data.guid, "amount": {"USD":"1.00"}},
+      {"account_guid": account2.data.guid, "amount": {"USD": "-1.00"}},
     ]
   });
 
   forget();
 
-  runTestWithDb(function(db2) {
-    qunit.ok(db2 instanceof dataModel.DB, "created object is DB");
+  runTestWithDb(function(db2, assert) {
+    qunit.ok(db2 instanceof model.DB, "created object is DB");
     var root = db2.getRealRoot();
     equal(2, root.children.size);
 
@@ -315,97 +274,118 @@ dbtest("restore data from IDB", function(db, assert) {
     var a2 = root.children.get("Test2");
     var sub = a1.children.get("Sub");
 
-    qunit.ok(a1);
-    qunit.ok(a2);
-    qunit.ok(sub);
+    qunit.ok(a1, "account 1 exists");
+    qunit.ok(a2, "account 2 exists");
+    qunit.ok(sub, "sub-account exists");
 
-    var balance1 = a1.newBalanceReader()
+    let done = assert.async();
+    let balance1 = a1.newBalanceReader({period: "FOREVER"});
+    model.Observable.whenLoaded([balance1], function() {
+      var fired1 = 0;
+      balance1.subscribe(this, function() {
+        fired1++;
+      });
+
+      equal(fired1, 0, "callback hasn't been fired yet");
+      let val = getSingleArrayValue(balance1.periods());
+      equal(val.end_balance.toString(), "$1.00", "Balance is as expected");
+      done();
+    });
+  }, assert);
+})
+
+dbtest("balances", function(db, assert) {
+  var account1 = db.createAccount(act({"name":"Test"}));
+  var account2 = db.createAccount(act({"name":"Test2"}));
+  var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
+
+  let balance1 = account1.newBalanceReader({period: "FOREVER"});
+  var balance2 = account2.newBalanceReader({period: "FOREVER"})
+  var balanceSub = sub.newBalanceReader({period: "FOREVER"})
+
+  let done = assert.async();
+
+  model.Observable.whenLoaded([balance1, balance2, balanceSub], function() {
+    qunit.ok(balance1, "successfully created balance reader");
+
     var fired1 = 0;
+    var fired2 = 0;
+    var firedSub = 0;
+
     balance1.subscribe(this, function() {
       fired1++;
     });
 
+    balance2.subscribe(this, function() {
+      fired2++;
+    });
+
+    balanceSub.subscribe(this, function() {
+      firedSub++;
+    });
+
     equal(fired1, 0);
-    equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
-  }, assert);
-})
+    equal(firedSub, 0);
+    equal(fired2, 0);
 
-dbtest("balances", function(db) {
-  var account1 = db.createAccount(act({"name":"Test"}));
-  var balance1 = account1.newBalanceReader()
-  var fired1 = 0;
-  balance1.subscribe(this, function() {
-    fired1++;
-  });
-  equal(fired1, 0);
-  qunit.ok(getValueFromIterator(balance1.iterator()).isEmpty());
+    assertPointIsZero(getSingleArrayValue(balance1.periods()));
+    assertPointIsZero(getSingleArrayValue(balance2.periods()));
+    assertPointIsZero(getSingleArrayValue(balanceSub.periods()));
 
-  var account2 = db.createAccount(act({"name":"Test2"}));
-  var balance2 = account2.newBalanceReader()
-  var fired2 = 0;
-  balance2.subscribe(this, function() {
-    fired2++;
-  });
-  qunit.ok(getValueFromIterator(balance2.iterator()).isEmpty());
+    var txn1 = db.createTransaction({
+      description: "Transaction 1",
+      date: "2015-09-23",
+      entry: [
+        {"account_guid": sub.data.guid, "amount": {"USD": "1.00"}},
+        {"account_guid": account2.data.guid, "amount": {"USD": "-1.00"}},
+      ]
+    });
 
-  var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
-  var balanceSub = sub.newBalanceReader()
-  var firedSub = 0;
-  balanceSub.subscribe(this, function() {
-    firedSub++;
-  });
-  qunit.ok(getValueFromIterator(balanceSub.iterator()).isEmpty());
+    qunit.ok(txn1);
+    equal(fired1, 1);
+    equal(firedSub, 1);
+    equal(fired2, 1);
+    equal(getSingleArrayValue(balance1.periods()).end_balance.toString(), "$1.00", "balance 1");
+    equal(getSingleArrayValue(balanceSub.periods()).end_balance.toString(), "$1.00", "balance 2");
+    equal(getSingleArrayValue(balance2.periods()).end_balance.toString(), "-$1.00", "balance 3");
 
-  var txn1 = db.createTransaction({
-    description: "Transaction 1",
-    timestamp: new Date().getTime(),
-    entry: [
-      {"account_guid": sub.data.guid, "amount": "1"},
-      {"account_guid": account2.data.guid, "amount": "-1"},
-    ]
-  });
+    // Check readers created after transaction already exists.
+    var balanceSub2 = sub.newBalanceReader({period: "FOREVER"})
+    var firedSub2 = 0;
+    balanceSub2.subscribe(this, function() {
+      firedSub2++
+    });
+    equal(firedSub2, 0);
+    equal(getSingleArrayValue(balanceSub2.periods()).end_balance.toString(), "$1.00", "newly created reader works");
 
-  qunit.ok(txn1);
-  equal(fired1, 1);
-  equal(firedSub, 1);
-  equal(fired2, 1);
-  equal(getValueFromIterator(balance1.iterator()).toString(), "$1.00");
-  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$1.00");
-  equal(getValueFromIterator(balance2.iterator()).toString(), "-$1.00");
+    // Update transaction and observe changes.
+    txn1.update({
+      description: "Transaction 1",
+      date: "2015-09-23",
+      entry: [
+        {"account_guid": account1.data.guid, "amount": {"USD": "2.50"}},
+        {"account_guid": account2.data.guid, "amount": {"USD": "-2.50"}},
+      ]
+    });
 
-  // Check readers created after transaction already exists.
-  var balanceSub2 = sub.newBalanceReader()
-  var firedSub2 = 0;
-  balanceSub2.subscribe(this, function() {
-    firedSub2++
-  });
-  equal(firedSub2, 0);
-  equal(getValueFromIterator(balanceSub2.iterator()).toString(), "$1.00");
+    equal(fired1, 2, "check gid");
+    equal(fired2, 2, "check diq");
+    equal(firedSub, 2, "check qox");
+    equal(firedSub2, 1, "check ofh");
+    equal(getSingleArrayValue(balance1.periods()).end_balance.toString(), "$2.50", "txn update propagated 1");
+    equal(getSingleArrayValue(balanceSub.periods()).end_balance.toString(), "", "txn update propagated 2");
+    equal(getSingleArrayValue(balance2.periods()).end_balance.toString(), "-$2.50", "txn update propagated 3");
 
-  // Update transaction and observe changes.
-  txn1.update({
-    description: "Transaction 1",
-    timestamp: new Date().getTime(),
-    entry: [
-      {"account_guid": account1.data.guid, "amount": "2.50"},
-      {"account_guid": account2.data.guid, "amount": "-2.50"},
-    ]
+    txn1.delete()
+    equal(fired1, 3, "check xzy");
+    equal(fired2, 3, "check zaa");
+    equal(firedSub, 2, "check sdb");
+    equal(firedSub2, 1, "check qeo");
+    equal(getSingleArrayValue(balance1.periods()).end_balance.toString(), "");
+    equal(getSingleArrayValue(balanceSub.periods()).end_balance.toString(), "");
+    equal(getSingleArrayValue(balance2.periods()).end_balance.toString(), "");
+
+    done();
   });
 
-  equal(fired1, 2);
-  equal(fired2, 2);
-  equal(firedSub, 2);
-  equal(firedSub2, 1);
-  equal(getValueFromIterator(balance1.iterator()).toString(), "$2.50");
-  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$0.00");
-  equal(getValueFromIterator(balance2.iterator()).toString(), "-$2.50");
-
-  txn1.delete()
-  equal(fired1, 3);
-  equal(fired2, 3);
-  equal(firedSub, 2);
-  equal(firedSub2, 1);
-  equal(getValueFromIterator(balance1.iterator()).toString(), "$0.00");
-  equal(getValueFromIterator(balanceSub.iterator()).toString(), "$0.00");
-  equal(getValueFromIterator(balance2.iterator()).toString(), "$0.00");
 });

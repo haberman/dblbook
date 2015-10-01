@@ -1,7 +1,7 @@
 
 import * as dblbook from 'dblbook';
 import * as React from 'react';
-import * as dataModel from 'data-model';
+import * as model from 'model';
 import { DefaultRoute, Link, Route, RouteHandler, NotFoundRoute } from 'react-router';
 import * as ReactRouter from 'react-router';
 
@@ -32,7 +32,7 @@ var routes = (
 );
 
 // Load the global database, then display the initial route once it's loaded.
-dataModel.DB.open().then(function(db) {
+model.DB.open().then(function(db) {
   // Gnucash importer doesn't yet have a proper way to get this.
   document.db = db;
 

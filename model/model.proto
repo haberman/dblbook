@@ -10,11 +10,6 @@ message Account {
 
   required string name = 3;
 
-  // ISO4217 currency identifiers (eg. "USD") are GUIDs.
-  // Other namespaces can be introduced with colons (ie. NASDAQ:GOOG).
-  // Very unique things (like "my house") should generate real GUIDs.
-  required string commodity_guid = 4;
-
   // Count towards net worth?  false for income/expense accounts.
   enum Type {
     TYPE_ASSET = 0;
@@ -25,19 +20,62 @@ message Account {
   required Type type = 5;
 }
 
+// Amounts are represented as string->string maps.  We don't create a separate
+// message for them to avoid an extra layer of nesting.  But all of this
+// documentation applies to any instance of amount:
+//
+// Key is either:
+//
+//   <commodity id>
+//   <commodity id>;<transaction guid>
+//
+// The second form is for when we want to track the transaction in which this
+// commodity was bought (lot info), for tracking basis price and time it was
+// held.
+//
+// ISO4217 currency identifiers (eg. "USD") are commodity ids.
+// Other namespaces can be introduced with colons (ie. NASDAQ:GOOG).
+// Commodity IDs cannot have a semicolon (;) in them, to avoid ambiguity.
+// For very unique things (like "my house") you should generate a real GUID.
+//
+// Value is string decimal, eg. 123.45.
+//
+// For now we require that all amounts must match the number of decimal places
+// indicated by the commodity.  We can relax this in the future if necessary.
+
 message Entry {
+  // Very likely will want to make this repeated, so it can reflect multiple
+  // account hierarchies (ie. Expenses/Contractors and Projects/BedroomRemodel).
   required string account_guid = 1;
-  required string amount = 2;  // As a string decimal, eg. 123.45
+
+  // The amount of this entry.  May only contain lot info only if this is an
+  // asset or liability account.
+  map<string, string> amount = 2;
 
   // If not present, uses the description of the transaction.
   optional string description = 3;
 
-  // Reflects the "post date" for accounts that have some concept of
-  // that.  If not present, the transaction date will be considered to have
-  // posted at exactly the same time as the transaction.
+  // TODO: add post date, along with an account in the main transaction for
+  // recording the "float".  This will allow different entries to post on
+  // different days, using the "float" account to store the temporary place.
+  // For example: accounts received, bank limbo, etc.
+}
+
+message CommodityPrices {
+  // The commodity that all prices are expressed in.
+  required string base_commodity = 1;
+
+  // Maps commodity -> string decimal price.
   //
-  // Format is: "YYYY-MM-DD" with trailing ordering suffix.
-  optional string postdate = 4;
+  // For example, this message gives a few stock prices in USD:
+  // {
+  //   base_commodity: "USD",
+  //   prices: {
+  //     "NASDAQ:GOOG": "635.30",
+  //     "NASDAQ:AAPL": "115.52"
+  //   }
+  // }
+  map<string, string> prices = 2;
 }
 
 // Grouping of transactions that must sum to zero.
@@ -47,9 +85,65 @@ message Transaction {
   // We could consider also having a guid which only pertains to this
   // *version* of the transaction.
   required string guid = 1;
-  required int64 timestamp = 2;  // usec since the epoch.
+
+  // Date of the transaction, expressed as YYYY-MM-DD.
+  //
+  // I would have liked to have made this a usec timestamp, but it appears to be
+  // an extremely strong convention that accounting transactions are recorded at
+  // day granularity.
+  required string date = 2;
+
   required string description = 3;
 
-  // There must be at least two, and they must sum to zero.
+  // There must be at least two entries.
+  //
+  // Amounts must sum to zero, after applying commodity prices to convert all
+  // amounts to the base commodity.  See commodity_prices below for more
+  // details.
   repeated Entry entry = 4;
+
+  // This must be present if any commodities are being bought or sold in this
+  // transaction (which would manifest as the sum of all entries as having
+  // multiple commodities).  These prices will be used to convert all non-base
+  // commodities to the base commodity, which must then sum to zero.
+  //
+  // Prior to applying commodity prices, any non-base commodity with a positive
+  // amount represents buying the commodity, and a negative amount represents
+  // selling it:
+  //
+  //  * When a commodity is sold, the commodity amount is divided by the price
+  //    and then rounded into the base commodity.
+  //
+  //  * When a commodity is bought, we need to figure out how much of the base
+  //    commodity was used to buy it.  In transactions with multiple commodities
+  //    bought, this is non-trivial because we have to figure out how much of
+  //    the remaining base commodity balance was used for each commodity
+  //    purchase.  We can't divide the bought amount by the commodity price,
+  //    because it might round to the wrong base_commodity value.  But we
+  //    ensure that there is a solution to the problem that will make the the
+  //    transaction balance.
+  optional CommodityPrices commodity_prices = 5;
+}
+
+//------------------------------------------------------------------------------
+// The remaining messages are INTERNAL ONLY -- they represent the schema that
+// the database uses internally to compute aggregates, so that we don't have
+// to read every transaction to construct point-in-time balances or delta over
+// a region.
+//------------------------------------------------------------------------------
+
+message Sum {
+  // <account guid>;<granularity>;<timestamp>
+  //
+  // - granularity is: "Y", "M", "D" for year/month/day
+  // - timestamp is "2015", "2015-03", "2015-03-05" for year/month/day.
+  //
+  // This lets us read a series of sums for a given account sequentially.
+  required string key = 1;
+
+  // Total number of transactions this Sum is summarizing.
+  required uint32 count = 1;
+
+  // The amount of the sum.
+  map<string, string> amount = 2;
 }

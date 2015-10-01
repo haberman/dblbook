@@ -38,14 +38,6 @@ function iterate(iter, func, funcThis) {
   }
 }
 
-function getValueFromIterator(iter) {
-  var pair = iter.next();
-  assert(!pair.done);
-  var ret = pair.value;
-  assert(iter.next().done);
-  return ret;
-}
-
 function setTimeoutRequestAnimationFrame(cb) {
   setTimeout(cb, 1000 / 60);
 }
@@ -256,7 +248,7 @@ var AccountListElement = React.createClass({
 
   // TODO: componentWillReceiveProps?
   componentWillMount: function() {
-    this.balance = this.props.account.newBalanceReader();
+    this.balance = this.props.account.newBalanceReader({"period": "FOREVER"});
   },
 
   renderTriangle: function() {
@@ -272,7 +264,7 @@ var AccountListElement = React.createClass({
   },
 
   renderBalance: function() {
-    var str = getValueFromIterator(this.balance.iterator()).toString();
+    var str = this.balance.periods()[0].toString();
     return <span>{str}</span>;
   },
 
@@ -312,7 +304,7 @@ var TransactionList = React.createClass({
     this.subscribe(this.props.reader);
     this.transactions = [];
 
-    for (let txn of this.props.reader.iterator()) {
+    for (let txn of this.props.reader.transactions()) {
       var info = txn.getAccountInfo(this.props.accountGuid);
       //var ts = moment(txn.data.timestamp/1000);
       var ts = txn.data.timestamp;
