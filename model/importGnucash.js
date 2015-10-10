@@ -1,16 +1,21 @@
 
+/* @flow */
+
+import { DB, Account } from './model.js';
+
 function parseXml(str) {
-  parser = new DOMParser();
+  let parser = new DOMParser();
+  console.log(parser);
   return parser.parseFromString(str, "text/xml");
 }
 
 function getXmlText(node, ns, name) {
-  var found = node.getElementsByTagNameNS(ns, name)[0];
+  let found = node.getElementsByTagNameNS(ns, name)[0];
   return found ? found.textContent : undefined;
 }
 
 function getXmlText2(node, ns, name, ns2, name2) {
-  var found = node.getElementsByTagNameNS(ns, name)[0];
+  let found = node.getElementsByTagNameNS(ns, name)[0];
   if (!found) {
     return undefined;
   }
@@ -30,23 +35,27 @@ function mapType(type) {
 }
 
 function mapCommodity(commodity) {
-  var cmdty="http://www.gnucash.org/XML/cmdty";
-  var space = getXmlText(commodity, cmdty, "space");
-  var id = getXmlText(commodity, cmdty, "id");
+  let cmdty="http://www.gnucash.org/XML/cmdty";
+  let space = getXmlText(commodity, cmdty, "space");
+  let id = getXmlText(commodity, cmdty, "id");
   if (space == "ISO4217") {
     return id;
-  } else {
+  } else if (space) {
     return space + ":" + id;
+  } else {
+    throw "Error: no commodity space";
   }
 }
 
 // "83523/100" -> "835.23"
-function ratioToDecimal(ratioStr) {
-  var parts = ratioStr.split("/");
-  var amount = parts[0];
-  var precision = Math.log10(parseInt(parts[1]));
-  var isNegative = false;
-  assert(Math.round(precision) == precision);
+function ratioToDecimal(ratioStr: string) {
+  let parts = ratioStr.split("/");
+  let amount = parts[0];
+  let precision = Math.log10(parseInt(parts[1]));
+  let isNegative = false;
+  if (Math.round(precision) != precision) {
+    throw "Precision didn't match.";
+  }
 
   if (amount.substring(0, 1) == "-") {
     isNegative = true;
@@ -56,91 +65,93 @@ function ratioToDecimal(ratioStr) {
   while (amount.length <= precision) {
     amount = "0" + amount;
   }
-  var ofs = amount.length - precision;
-  var ret = amount.substr(0, ofs) + "." + amount.substr(ofs);
+  let ofs = amount.length - precision;
+  let ret = amount.substr(0, ofs) + "." + amount.substr(ofs);
   if (isNegative) {
     ret = "-" + ret;
   }
   return ret;
 }
 
-function importGnucash2(xmlString, db, rootForNew) {
+export function importGnucash(xmlString: string, db: DB, rootForNew: ?Account) {
   // Namespaces.
-  var gnc = "http://www.gnucash.org/XML/gnc";
-  var act = "http://www.gnucash.org/XML/act";
-  var trn = "http://www.gnucash.org/XML/trn";
-  var ts = "http://www.gnucash.org/XML/ts";
-  var split = "http://www.gnucash.org/XML/split";
-  var xml = parseXml(xmlString);
+  let gnc = "http://www.gnucash.org/XML/gnc";
+  let act = "http://www.gnucash.org/XML/act";
+  let trn = "http://www.gnucash.org/XML/trn";
+  let ts = "http://www.gnucash.org/XML/ts";
+  let split = "http://www.gnucash.org/XML/split";
+  let xml = parseXml(xmlString);
 
-  var gnucashRootGuid;
+  let gnucashRootGuid;
+  let accountCommodities = new Map();
+
+  let accounts = xml.getElementsByTagNameNS(gnc, "account");
+  let transactions = xml.getElementsByTagNameNS(gnc, "transaction");
 
   // Import accounts.
-  var accounts = xml.getElementsByTagNameNS(gnc, "account");
-  for (var i = 0; i < accounts.length; i++) {
-    var gnucashAccount = accounts[i];
-    var newAccount = {
-      guid: getXmlText(gnucashAccount, act, "id"),
-      name: getXmlText(gnucashAccount, act, "name"),
-      type: mapType(getXmlText(gnucashAccount, act, "type")),
-      commodity_guid: mapCommodity(gnucashAccount, act, "commodity"),
-    }
-
-    // We count on seeing the parent first.
-    if (newAccount.type == "ROOT") {
-      delete newAccount.type;
-      gnucashRootGuid = newAccount.guid;
-    } else if (newAccount.type == "EQUITY") {
-      console.log("Skipping: ", newAccount)
-    } else {
-      var parentGuid = getXmlText(gnucashAccount, act, "parent");
-      if (parentGuid == gnucashRootGuid) {
-        newAccount.parent_guid = rootForNew;
-      } else {
-        newAccount.parent_guid = parentGuid;
+  db.atomic(() => {
+    for (let i = 0; i < accounts.length; i++) {
+      let gnucashAccount = accounts[i];
+      let newAccount = {
+        guid: getXmlText(gnucashAccount, act, "id"),
+        name: getXmlText(gnucashAccount, act, "name"),
+        type: mapType(getXmlText(gnucashAccount, act, "type")),
+        parent_guid: null,
       }
+      let commodity = mapCommodity(gnucashAccount, act, "commodity");
+      accountCommodities.set(newAccount.guid, commodity);
 
-      db.createAccount(newAccount);
+      // We count on seeing the parent first.
+      if (newAccount.type == "ROOT") {
+        delete newAccount.type;
+        gnucashRootGuid = newAccount.guid;
+      } else if (newAccount.type == "EQUITY") {
+        console.log("Skipping: ", newAccount)
+      } else {
+        let parentGuid = getXmlText(gnucashAccount, act, "parent");
+        if (parentGuid == gnucashRootGuid) {
+          newAccount.parent_guid = rootForNew;
+        } else {
+          newAccount.parent_guid = parentGuid;
+        }
+
+        db.createAccount(newAccount);
+      }
     }
-  }
+  });
 
   // Import transactions.
-  var transactions = xml.getElementsByTagNameNS(gnc, "transaction");
-  for (var i = 0; i < transactions.length; i++) {
-    var gnucashTransaction = transactions[i];
-    var newTransaction = {
-      guid: getXmlText(gnucashTransaction, trn, "id"),
-      timestamp: getXmlText2(gnucashTransaction, trn, "date-posted", ts, "date"),
-      description: getXmlText(gnucashTransaction, trn, "description"),
-      entry: [],
-    }
-
-    var timestampMs = Date.parse(newTransaction.timestamp);
-    newTransaction.timestamp = timestampMs * 1000;
-
-    var splits = gnucashTransaction.getElementsByTagNameNS(trn, "split")
-    for (var j = 0; j < splits.length; j++) {
-      var gnucashSplit = splits[j];
-      var newSplit = {
-        account_guid: getXmlText(gnucashSplit, split, "account"),
-        amount: ratioToDecimal(getXmlText(gnucashSplit, split, "quantity")),
+  db.atomic(() => {
+    for (let i = 0; i < transactions.length; i++) {
+      let gnucashTransaction = transactions[i];
+      let newTransaction = {
+        guid: getXmlText(gnucashTransaction, trn, "id"),
+        date: getXmlText2(gnucashTransaction, trn, "date-posted", ts, "date"),
+        description: getXmlText(gnucashTransaction, trn, "description"),
+        entry: [],
       }
-      newTransaction.entry.push(newSplit);
-    }
 
-    db.createTransaction(newTransaction);
-  }
+      let splits = gnucashTransaction.getElementsByTagNameNS(trn, "split")
+      for (let j = 0; j < splits.length; j++) {
+        let gnucashSplit = splits[j];
+        let accountGuid = getXmlText(gnucashSplit, split, "account");
+        let quantityText = getXmlText(gnucashSplit, split, "quantity");
+        if (!accountGuid || !quantityText) {
+          throw "Error: missing account or quantity.";
+        }
+        let quantity = ratioToDecimal(quantityText);
+        let newSplit = {
+          account_guid: accountGuid,
+          amount: {},
+        };
+        newSplit.amount[accountCommodities.get(accountGuid)] = quantity;
+        newTransaction.entry.push(newSplit);
+      }
+
+      db.createTransaction(newTransaction);
+    }
+  });
 
   console.log("Imported " + accounts.length + " accounts, " +
               transactions.length + " transactions");
-}
-
-function importGnucash(event) {
-  var reader = new FileReader();
-  reader.onload = (function(e) {
-    importGnucash2(reader.result, document.db);
-  });
-  reader.onerror = (function(e) {
-  });
-  reader.readAsText(event.target.files[0]);
 }

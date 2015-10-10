@@ -103,12 +103,11 @@ class SortedMapIterator<K, V> {
     this.done = false;
   }
 
-  // $FlowIssue: 'computed property keys not supported'
-  [Symbol.iterator]() {
-    return this;
-  }
+  // $FlowIssue: Computed property keys not supported.
+  [Symbol.iterator]() { return this; }
 
-  next(): {done: boolean, value: ?[K, V]} {
+  // $FlowIssue: It doesn't like what's going on here.
+  next() {
     let item;
     if (this.done || (item = this.rbIter[this.nextFunc]()) == null) {
       this.done = true;
@@ -200,16 +199,29 @@ class SortedMap<K, V> {
 
   /**
    * Returns an iterator over the map's entries, in key order.
+   * If a key is provided, iteration starts at or immediately
+   * after this key.
    */
-  iterator(): SortedMapIterator<K, V> {
-    return new SortedMapIterator(this.tree.iterator(), "next");
+  iterator(key: ?K): SortedMapIterator<K, V> {
+    if (key) {
+      return new SortedMapIterator(this.tree.lowerBound([key, null]), "next");
+    } else {
+      return new SortedMapIterator(this.tree.iterator(), "next");
+    }
   }
 
   /**
    * Returns an iterator over the map's entries, in reverse key order.
+   * If a key is provided, iteration starts immediately before this key.
    */
-  riterator(): SortedMapIterator<K, V> {
-    return new SortedMapIterator(this.tree.iterator(), "prev");
+  riterator(key: ?K): SortedMapIterator<K, V> {
+    if (key) {
+      let iter = new SortedMapIterator(this.tree.iterator(), "prev");
+      iter.next();  // Skip element after this key.
+      return iter;
+    } else {
+      return new SortedMapIterator(this.tree.iterator(), "prev");
+    }
   }
 }
 
@@ -419,6 +431,11 @@ export class Amount {
       }
     }
     var ret = strs.join(", ");
+
+    if (ret == "") {
+      ret = "0";
+    }
+
     return ret;
   }
 
@@ -487,10 +504,11 @@ Period.add(
   "WEEK",
   // Currently this always starts weeks on Sunday, could make this configurable.
   (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay()),
-  (d) => new Date(d.getFullYear, d.getMonth(), d.getDate() + 7 - d.getDay())
+  (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7 - d.getDay())
 );
 
-Period.add("DAY",
+Period.add(
+  "DAY",
   (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()),
   (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
 );
@@ -527,12 +545,6 @@ class SummingPeriod extends Period {
 
     SummingPeriod.periods2.push(new_period);
     Period.periods.set(period.name, new_period);
-  }
-
-  stringToDate(string) {
-    let d = new Date();
-    d.setTime(Date.parse(string));
-    return d;
   }
 
   /**
@@ -606,8 +618,8 @@ SummingPeriod.periods2 = [];
 // Periods we internally aggregate by (must also be defined above).
 // Order is significant: must be listed biggest to smallest.
 SummingPeriod.add2("YEAR",  "Y",  4, SummingPeriod.onYearBoundary);
-SummingPeriod.add2("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
-SummingPeriod.add2("DAY",   "D", 10, SummingPeriod.onDayBoundary);
+//SummingPeriod.add2("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
+//SummingPeriod.add2("DAY",   "D", 10, SummingPeriod.onDayBoundary);
 
 
 /** Observable ********************************************************/
@@ -670,7 +682,7 @@ export class Observable {
 /** DB ************************************************************************/
 
 // Maps object store name to its key field name.
-let ObjectStores = {
+const ObjectStores = {
   "transactions": "guid",
   "accounts": "guid",
   "sums": "key"
@@ -693,12 +705,13 @@ let ObjectStores = {
 export class DB {
   idb: any;
 
-  accountsByGuid: Map<string, Account>;
-  transactionsByTime: SortedMap<string, Transaction>;
+  accountsByGuid:     Map<string, Account>;
   transactionsByGuid: Map<string, Transaction>;
-  sumsByKey: SortedMap<string, Sum>;
+  transactionsByTime: SortedMap<string, Transaction>;
+  sumsByKey:          SortedMap<string, Sum>;
 
   readers: Set<Reader>;
+  entryLists: Set<EntryList>;
 
   atomicLevel: number;
   dirtyMap: Map<string, Set<DbUpdater>>;
@@ -714,6 +727,7 @@ export class DB {
    */
   constructor() {
     this.readers = new Set();
+    this.entryLists = new Set();
     this.accountsByGuid = new Map();
 
     // Key is [decimal usec][guid].
@@ -734,14 +748,12 @@ export class DB {
       "name": "Real Root Account (internal)",
       "guid": "REAL_ROOT",
       "type": "ASSET",
-      "commodity_guid": "USD"
     }, true);
 
     new Account(this, {
       "name": "Nominal Root Account (internal)",
       "guid": "NOMINAL_ROOT",
       "type": "INCOME",
-      "commodity_guid": "USD"
     }, true);
   }
 
@@ -838,7 +850,7 @@ export class DB {
             db.sumsByKey.set(sum.key, new Sum(db, sum.key, sum));
             cursor.continue();
           } else {
-            resolve();
+            resolve(db);
           }
         }
       });
@@ -953,10 +965,8 @@ export class DB {
 
     for (let [collection, objSet] of this.dirtyMap) {
       let objectStore = txn.objectStore(collection);
-      console.log("Flush dirty collection: ", collection);
 
       for (let obj of objSet) {
-        console.log("Flush dirty obj: ", obj);
         obj._addToTransaction(objectStore, this.version);
         added.push(obj);
       }
@@ -965,19 +975,12 @@ export class DB {
     this.committing++;
     this.dirtyMap.clear();
 
-    // Even though the results aren't committed yet, we update our Readers to
-    // reflect the changes.  If the UI wants to know whether the writes have
-    // been written to the DB, it can check db.committing == 0.  We could
-    // also potentially return a promise from atomic() that gives a signal for
-    // when the transaction was committed.
-    //
-    // OPT: if we wanted to we would optimize this to only refresh readers that
-    // actually changed.  But we generally expect there to be a relatively small
-    // number of readers, and we expect refreshing them from in-memory data
-    // to be very cheap.
-    for (let reader of this.readers) {
-      reader._refresh();
-    }
+    // For now we opt to refresh readers before the commit is complete.
+    // This means we could show the user updates that haven't been committed,
+    // and could technically become lost.  If we really wanted to we could wait
+    // to refresh readers until the commit was successful, but it seems unlikely
+    // that this would be worth it (unless perhaps we were a server).
+    this._refreshReaders();
 
     txn.oncomplete = () => {
       --this.committing;
@@ -993,6 +996,23 @@ export class DB {
       setTimeout(function(){
           throw "Write transaction failed, cannot continue.";
       });
+    }
+  }
+
+  _refreshReaders() {
+    // OPT: if we wanted to we would optimize this to only refresh readers that
+    // actually changed.  But we generally expect there to be a relatively small
+    // number of readers, and we expect refreshing them from in-memory data
+    // to be very cheap.
+
+    // Need to refresh EntryLists first because Readers may depend on their
+    // contents.
+    for (let entryList of this.entryLists) {
+      entryList._refresh();
+    }
+
+    for (let reader of this.readers) {
+      reader._refresh();
     }
   }
 
@@ -1115,17 +1135,28 @@ export class DB {
     return this._getSumByKey(account, period.getSumKey(period.roundDown(date)));
   }
 
-  _getSumsForAccountPeriod(account: Account,
-                           startDate: Date, endDate: Date): Array<Sum> {
+  _getAmountReadersForPeriod(account: Account,
+                             startDate: Date,
+                             endDate: Date): Array<IGetAmount> {
     return SummingPeriod.getSumKeysForRange(startDate, endDate).map(
-      (key) => this._getSumByKey(account, key)
+      (key) => this._getSumByKey(account, key).toIGetAmount()
     );
+  }
+
+  /**
+   * Parse a date in DB format (YYYY-MM-DD) and returns a Date object.
+   * Since we internally interpret Date objects as local time (not UTC)
+   * we need to replace "-" characters in the date with "/", so that the
+   * Date constructor will parse them as local time.
+   */
+  static parseDate(dateStr: string): Date {
+    return new Date(dateStr.replace(/-/g, "/"));
   }
 }
 
 /** DbUpdater *****************************************************************/
 
-let ObjectStates = {
+const ObjectStates = {
   ADD_PENDING: 0,
   UPDATE_PENDING: 1,
   COMMITTED: 2,
@@ -1138,7 +1169,8 @@ class DbObject extends Observable {
   dbUpdater: DbUpdater;
   version: number;
 
-  toModel(): Object { return {}; }
+  toModel(): Object { throw "Must override"; }
+  getVersion(): number { return this.version; }
 }
 
 /**
@@ -1200,10 +1232,8 @@ class DbUpdater {
     }
 
     if (this.state == ObjectStates.DELETE_PENDING) {
-      console.log("DbUpdater addToTransaction -> DELETED", this.obj);
       this.state = ObjectStates.DELETED;
     } else {
-      console.log("DbUpdater addToTransaction -> COMMITTED", this.obj);
       this.state = ObjectStates.COMMITTED;
     }
 
@@ -1221,7 +1251,6 @@ class DbUpdater {
    * The object's toModel() function will be called to obtain the actual data.
    */
   update() {
-    console.log("DbUpdater update", this.obj);
     this.checkOkToUpdate();
 
     if (true) {
@@ -1233,9 +1262,7 @@ class DbUpdater {
       }
     }
 
-    console.log("DbUpdater update 2", this.state, this.obj);
     if (this.state == ObjectStates.COMMITTED) {
-      console.log("DbUpdater update COMMITTED -> UPDATE_PENDING", this.obj);
       this.state = ObjectStates.UPDATE_PENDING;
       this.db._addDirty(this, this.collection);
     }
@@ -1284,6 +1311,7 @@ class DbUpdater {
  * to it.
  */
 export class Account extends DbObject {
+  db: DB;
   data: Object;
   parent: ?Account;
   children: SortedMap<string, Account>;
@@ -1349,8 +1377,7 @@ export class Account extends DbObject {
   static isValid(accountData) {
     var ret = typeof accountData.name == "string" &&
         typeof accountData.type == "string" &&
-        typeof rootForType(accountData.type) == "string" &&
-        typeof accountData.commodity_guid == "string";
+        typeof rootForType(accountData.type) == "string";
     if (!ret) {
       console.log("Invalid account: ", accountData);
     }
@@ -1447,153 +1474,18 @@ export class Account extends DbObject {
    * Returns a promise for a new Reader that vends balance/delta information
    * for a series of equally-spaced time windows (for example, every day for
    * seven days).
-   *
-   * Each iterated item is an object containing the members:
-   *
-   * {
-   *   // Represents the beginning and end of the period.
-   *   // The end date is 1ms before the beginning of the next start date.
-   *   start_date: Date(),
-   *   end_date: Date(),
-   *
-   *   // The overall balance for this account at the start/end of the period.
-   *   start_balance: Amount(),
-   *   end_balance: Amount(),
-   *
-   *   // The change in balance over this period (end_balance - start_balance).
-   *   delta: Amount()
-   * }
-   *
-   * Options (and their defaults) are: {
-   *   // How many time windows should be part of the sequence.
-   *   "count": 1,
-   *
-   *   // Specify either start_date OR end_date (but not both).
-   *   // The first (or last) period of the series will include this date.
-   *   "start_date": new Date(),
-   *   "end_date": new Date(),
-   *
-   *   // TODO: add an "exclude future transactions" flag?
-   *   // That would let users get an "year-to-date" value (for example) without
-   *   // including future (ie. speculative) transactions.
-   *
-   *   // Frequency of points.
-   *   // Valid values are: "DAY", "WEEK", "MONTH", "QUARTER", "YEAR",
-   *                        "FOREVER".
-   *   // "FOREVER" is only valid when count = 1.
-   *   "frequency": "FOREVER",
-   * }
    */
-  newBalanceReader(options: Object): BalanceReader {
+  newBalanceReader(options: BalanceReaderOptions): BalanceReader {
     return new BalanceReader(this, options);
   }
 
   /**
    * Returns a new EntryReader that vends a sequence of Entry objects for this
-   * account.  Each iterated item is a pair of:
-   *
-   *   [Entry, Amount]
-   *
-   * Where the Amount is the overall balance of this account.
-   *
-   * TODO: figure out options.
-   *
-   * - start/end/count and what combination should be supported?
-   * - do we need to support both date orders or just one?
-   *
-   * Options (and their defaults) are: {
-   *   // How many transactions should be part of the sequence.
-   *   "count": 20,
-   *
-   *   // The first returned transaction will be the one directly at or before
-   *   // this date.
-   *   "end": new Date(),
-   * }
-   *
-   * Note: if this is a *leaf* account, the ordering will reflect the post date
-   * if any (for the entry in this account).  For all non-leaf accounts, the
-   * ordering reflects the transaction's time.
-   *
-   * Note: the Reader is only considered to change when the *set* of transactions
-   * changes.  The actual *contents* of the transactions are not monitored; to
-   * keep track of those, subscribe to the contained Transactions themselves.
    */
   newEntryReader(options: Object): EntryReader {
-    var defaults = {
-      type: "transaction",
-      count: 20,
-      end: new Date(),
-      includeChildren: true
-    }
-
-    var opts = merge(options, defaults);
-    return new EntryReader(this, opts);
+    return new EntryReader(this, options);
   }
 
-}
-
-/** Sum ***********************************************************************/
-
-/**
- * Class that represents the sum of all entry amounts for a particular account
- * (and its children) over a window of time.
- *
- * This class is internal-only.  It is not actually observable despite deriving
- * DbObject < Observable (we're compensating a lack of multiple inheritance).
- */
-class Sum extends DbObject {
-  key: string;
-  amount: Amount;
-  count: number;
-
-  constructor(db, key, data) {
-    super();
-
-    this.db = db;
-    this.key = key;
-
-    if (data) {
-      if (data.key != this.key) {
-        throw "Keys didn't match.";
-      }
-      this.amount = new Amount(data.amount);
-      this.count = data.count;
-    } else {
-      this.amount = new Amount();
-      this.count = 0;
-    }
-
-    // Since a new sum always starts at 0, which doesn't require an explicit
-    // write to the DB, we always start by assuming that our initial state
-    // is what also exists in the db.
-    this.dbUpdater = new DbUpdater(db, "sums", this, true);
-  }
-
-  /**
-   * Adds an entry to our sums.
-   */
-  add(entry) {
-    this.amount.add(entry.amount);
-    this.count += 1;
-    this.dbUpdater.update();
-  }
-
-  /**
-   * Subtracts an entry to our sums.
-   */
-  sub(entry) {
-    this.amount.sub(entry.amount);
-    this.count -= 1;
-    this.dbUpdater.update();
-  }
-
-  toModel() {
-    return {
-      key: this.key,
-      count: this.count,
-      amount: this.amount.toModel()
-    };
-  }
 }
 
 /** Entry *********************************************************************/
@@ -1604,8 +1496,8 @@ class Sum extends DbObject {
  * single account.
  *
  * Entry does *not* provide the current balance of the account.  For that, use
- * db.newEntryReader(), which will provide Entry objects *along with* current
- * balance data.
+ * account.newEntryReader(), which will provide Entry objects *along with*
+ * current balance data.
  *
  * These Entry objects are not 1:1 with Transaction entries in the database.
  * We create extra Entry objects for parent accounts of the actual DB entry,
@@ -1636,6 +1528,13 @@ class Entry {
     this.sums = SummingPeriod.periods2.map(
       (p) => txn.db._getSum(account, txn.date, p)
     );
+  }
+
+  /**
+   * Returns the date of this Entry.
+   */
+  getDate(): Date {
+    return this.txn.getDate();
   }
 
   /**
@@ -1697,7 +1596,7 @@ export class Transaction extends DbObject {
 
     this.db = db;
     this.data = txnData;
-    this.date = new Date(txnData.date);
+    this.date = DB.parseDate(txnData.date);
 
     if (!this.db.transactionIsValid(txnData)) {
       throw "invalid transaction";
@@ -1823,12 +1722,30 @@ export class Transaction extends DbObject {
   }
 
   /**
+   * Returns the entry for the given account in this transaction, or null
+   * if there is no entry for this account.
+   *
+   * TODO(haberman): will need to add a date parameter if/when transactions
+   * can have multiple entries for the same account, but on different days.
+   */
+  getEntry(account: Account) {}
+
+  /**
+   * Returns the date of this transaction.
+   *
+   * TODO(haberman): will need to add a date parameter if/when transactions
+   * can have multiple entries for the same account, but on different days.
+   */
+  getDate(): Date {
+    return this.date;
+  }
+
+  /**
    * Updates an existing transaction.  Transaction guid must be set, and the
    * transaction must be valid.  This will completely overwrite the previous
    * value of this transaction.
    */
   update(newData: Object) {
-    console.log("Transaction update");
     this.dbUpdater.checkOkToUpdate();
 
     if (!this.db.transactionIsValid(newData)) {
@@ -1890,71 +1807,327 @@ export class Transaction extends DbObject {
   }
 }
 
+/** Sum ***********************************************************************/
+
+/**
+ * Class that represents the sum of all entry amounts for a particular account
+ * (and its children) over a window of time.
+ *
+ * This class is internal-only.  It is not actually observable despite deriving
+ * DbObject < Observable (we're compensating a lack of multiple inheritance).
+ */
+class Sum extends DbObject {
+  key: string;
+  amount: Amount;
+  count: number;
+
+  // Implements the interface IGetAmount.
+  toIGetAmount(): IGetAmount {
+    return ((this: any): IGetAmount);
+  }
+
+  constructor(db, key, data) {
+    super();
+
+    this.db = db;
+    this.key = key;
+
+    if (data) {
+      if (data.key != this.key) {
+        throw "Keys didn't match.";
+      }
+      this.amount = new Amount(data.amount);
+      this.count = data.count;
+    } else {
+      this.amount = new Amount();
+      this.count = 0;
+    }
+
+    // Since a new sum always starts at 0, which doesn't require an explicit
+    // write to the DB, we always start by assuming that our initial state
+    // is what also exists in the db.
+    this.dbUpdater = new DbUpdater(db, "sums", this, true);
+  }
+
+  getAmount(): Amount { return this.amount; }
+
+  /**
+   * Adds an entry to our sums.
+   */
+  add(entry) {
+    this.amount.add(entry.amount);
+    this.count += 1;
+    this.dbUpdater.update();
+  }
+
+  /**
+   * Subtracts an entry to our sums.
+   */
+  sub(entry) {
+    this.amount.sub(entry.amount);
+    this.count -= 1;
+    this.dbUpdater.update();
+  }
+
+  toModel() {
+    return {
+      key: this.key,
+      count: this.count,
+      amount: this.amount.toModel()
+    };
+  }
+}
+
+/** EntryList *****************************************************************/
+
+class EntryListOptions {
+  // Users must specify two of three of these options.
+  //
+  // When specifying an endDate and minCount, the actual count will be
+  // increased so that all entries for the first day are included in the list.
+
+  minCount: ?number;
+  startDate: ?Date;
+  endDate: ?Date;
+}
+
+/**
+ * Class that provides an up-to-date list of entries for a given account in some
+ * time window.
+ *
+ * This type is sort of like EntryReader except it does not provide the overall
+ * account balance for each entry, just the amount (delta) for this transaction.
+ * EntryList is used by both EntryReader and BalanceReader (BalanceReader only
+ * uses it when no pre-computed sum is available at the right granularity).
+ * Also EntryList is internal-only while EntryReader is used directly by users.
+ */
+class EntryList {
+  db: DB;
+  account: Account;
+  entries: Array<Entry>;
+  amount: ?Amount;
+
+  options: EntryListOptions;
+
+  constructor(account: Account, options: EntryListOptions) {
+    this.db = account.db;
+    this.account = account;
+    this.options = options;
+
+    let has = 0;
+
+    if (options.minCount) { has++; }
+    if (options.startDate) { has++; }
+    if (options.endDate) { has++; }
+
+    if (has != 2) {
+      throw "Must specify 2 of: minCount, startDate, endDate";
+    }
+  }
+
+  /**
+   * Returns the sum of the amounts for all entries in the list.
+   * We compute it lazily, since it is not always required.
+   */
+  getAmount(): Amount {
+    if (this.amount) {
+      return this.amount;
+    } else {
+      let amount = new Amount();
+      for (let entry of this.entries) {
+        amount.add(entry.getAmount());
+      }
+      this.amount = amount;
+      return amount;
+    }
+  }
+
+  /**
+   * Returns the list of entries for these criteria.
+   * Entries are returned in ascending date order.
+   */
+  getEntries(): Array<Entry> {
+    return this.entries;
+  }
+
+  _refresh() {
+    this.entries = []
+    this.amount = null;
+    let options = this.options;
+
+    if (options.startDate) {
+      // All cases except [endDate, count].
+      // Iterate forwards, adding entries until we hit our stop criterion.
+      //
+      // $FlowIssue: Doesn't recognize the iterator.
+      for (let txn of this.db.transactionsByTime.iterator(options.startDate)) {
+        let entry = txn.getEntry(this.account);
+
+        if ((options.endDate && entry.getDate() > options.endDate) ||
+            (options.minCount && options.minCount == this.entries.length)) {
+          break;
+        }
+
+        this.entries.push(entry);
+      }
+    } else {
+      // The case of [endDate, count].
+      // Iterate backwards, adding entries until we hit our minCount.
+
+      let firstDate = null;
+
+      // $FlowIssue: Doesn't recognize the iterator.
+      for (let txn of this.db.transactionsByTime.riterator(this.endDate)) {
+        let entry = txn.getEntry(this.account);
+
+        if (firstDate && entry.getDate() < firstDate) {
+          break;
+        }
+
+        this.entries.push(entry);
+
+        if (options.minCount == this.entries.length) {
+          // We don't stop iteration until we have all of the entries for this
+          // day.  This is important for computing overall balances.
+          firstDate = entry.getDate();
+        }
+      }
+      this.entries.reverse();
+    }
+  }
+}
+
+
 /** BalanceReader *************************************************************/
 
-let Periods = new Set(["DAY", "WEEK", "MONTH", "QUARTER", "YEAR", "FOREVER"]);
+const Periods = new Set(["DAY", "WEEK", "MONTH", "QUARTER", "YEAR", "FOREVER"]);
 
 // These limits shouldn't be too wide until we have smarter logic about tracking
 // min/max transaction per account.
-let DateLimits = {
+export const DateLimits = {
   MIN_DATE: new Date("2000/01/01"),
   MAX_DATE: new Date("2020/01/01"),
 };
 
 class Reader extends Observable {
+  account: Account;
+  db: DB;
+
+  constructor(account: Account) {
+    super();
+
+    this.db = account.db;
+    this.db.readers.add(this);
+  }
+
   _refresh() {}
+
+  release() {
+    this.db.readers.delete(this);
+  }
+}
+
+// An interface implemented by Sum and EntryList.
+class IGetAmount {
+  getAmount(): Amount { throw "Must override in a derived class."; }
+  getVersion(): number { throw "Must override in a derived class."; }
+}
+
+/**
+ * The objects that are vended by BalanceReader.
+ */
+class BalanceReaderPoint {
+  // Represents the beginning and end of the period.
+  // The end date is 1ms before the beginning of the next start date.
+  startDate: Date;
+  endDate: Date;
+
+  // The overall balance for this account at the start/end of the period.
+  startBalance: Amount;
+  endBalance: Amount;
+
+  // The change in balance over this period (endBalance - startBalance).
+  delta: Amount;
+}
+
+class BalanceReaderOptions {
+  // How many time windows should be part of the sequence (default: 1).
+  count: number;
+
+  // Specify either startDate OR endDate (but not both).
+  // The first (or last) period of the series will include this date.
+  startDate: Date;
+  endDate: Date;
+
+  // TODO: add an "exclude future transactions" flag?
+  // That would let users get an "year-to-date" value (for example) without
+  // including future (ie. speculative) transactions.
+
+  // Frequency of points.
+  // Valid values are: "DAY", "WEEK", "MONTH", "QUARTER", "YEAR",
+  //                   "FOREVER".
+  // "FOREVER" is only valid when count = 1.
+  frequency: string;
+}
+
+class BalanceReaderPeriod {
+  startDate: Date;
+  endDate: Date;
+  amounts: Array<IGetAmount>;
 }
 
 class BalanceReader extends Reader {
   db: DB;
-  _periods: Array<Object>;
-  initialSums: Array<Sum>;
+  periods: Array<BalanceReaderPeriod>;
+  points: Array<BalanceReaderPoint>;
+  initialSums: Array<IGetAmount>;
   version: number;
 
   constructor(account, options) {
-    super();
+    super(account);
 
-    if (!Periods.has(options.period)) {
-      throw "Unknown period: " + options.period;
+    if (!Periods.has(options.frequency)) {
+      throw "Unknown frequency: " + options.frequency;
     }
 
-    // Instead of these rules, we could implement a 2-of-3 for start_date,
-    // end_date, count.
-    if (options.period == "FOREVER") {
+    // Instead of these rules, we could implement a 2-of-3 for startDate,
+    // endDate, count.
+    if (options.frequency == "FOREVER") {
       if (options.count && options.count != 1) {
-        throw "FOREVER period requires count == 1 (or omit it)";
+        throw "FOREVER frequency requires count == 1 (or omit it)";
       }
     }
 
     this.db = account.db;
     this.db.readers.add(this);
 
-    this._periods = [];
+    this.periods = [];
     this.version = 0;
 
-    if (options.period == "FOREVER") {
+    if (options.frequency == "FOREVER") {
       if (options.count && options.count != 1) {
-        throw "FOREVER period requires count == 1 (or omit it)";
+        throw "FOREVER frequency requires count == 1 (or omit it)";
       }
-      this._periods.push({
-        start_date: DateLimits.MIN_DATE,
-        end_date: DateLimits.MAX_DATE,
+      this.periods.push({
+        startDate: DateLimits.MIN_DATE,
+        endDate: DateLimits.MAX_DATE,
+        amounts: [],
       });
     } else {
       /*
       let step, date;
 
-      if (options.start_date) {
-        if (options.end_date) {
+      if (options.startDate) {
+        if (options.endDate) {
           throw "Specifying both start and end date isn't supported yet.";
         }
-        date = options.start_date;
+        date = options.startDate;
         step = 1;
       } else {
-        if (!options.end_date) {
-          throw "Must specify one of start_date, end_date";
+        if (!options.endDate) {
+          throw "Must specify one of startDate, endDate";
         }
-        date = options.end_date;
+        date = options.endDate;
         step = -1;
       }
 
@@ -1964,47 +2137,47 @@ class BalanceReader extends Reader {
 
       this._pushPeriod(date);
 
-      if (options.period == "DAY") {
+      if (options.frequency == "DAY") {
         for (let i = 1; i < options.count; i++) {
           date.setDate(date.getDate() + step);
-          this._pushPeriod(date, options.period);
+          this._pushPeriod(date, options.frequency);
         }
-      } else if (options.period == "WEEK") {
+      } else if (options.frequency == "WEEK") {
         for (let i = 1; i < options.count; i++) {
           date.setDate(date.getDate() + (step * 14));
-          this._pushPeriod(date, options.period);
+          this._pushPeriod(date, options.frequency);
         }
-      } else if (options.period == "MONTH") {
+      } else if (options.frequency == "MONTH") {
         for (let i = 1; i < options.count; i++) {
           date.setMonth(date.getMonth() + step);
-          this._pushPeriod(date, options.period);
+          this._pushPeriod(date, options.frequency);
         }
-      } else if (options.period == "QUARTER") {
+      } else if (options.frequency == "QUARTER") {
         for (let i = 1; i < options.count; i++) {
           date.setMonth(date.getMonth() + (step * 3));
-          this._pushPeriod(date, options.period);
+          this._pushPeriod(date, options.frequency);
         }
-      } else if (options.period == "YEAR") {
+      } else if (options.frequency == "YEAR") {
         for (let i = 1; i < options.count; i++) {
           date.setYear(date.getFullYear() + step);
-          this._pushPeriod(date, options.period);
+          this._pushPeriod(date, options.frequency);
         }
       }
 
       if (step == -1) {
         // So the points are in forwards chronological order.
-        this.periods.reverse();
+        this.periods_.reverse();
       }
       */
     }
 
-    for (let period of this._periods) {
-      period._sums = this.db._getSumsForAccountPeriod(
-          account, period.start_date, period.end_date);
+    for (let period of this.periods) {
+      period.amounts = this.db._getAmountReadersForPeriod(
+          account, period.startDate, period.endDate);
     }
 
-    this.initialSums = this.db._getSumsForAccountPeriod(
-        account, DateLimits.MIN_DATE, this._periods[0].start_date);
+    this.initialSums = this.db._getAmountReadersForPeriod(
+        account, DateLimits.MIN_DATE, this.periods[0].startDate);
 
     this._refresh();
   }
@@ -2013,27 +2186,33 @@ class BalanceReader extends Reader {
     // Re-compute the pre-computed sums.
     var maxVersion = 0;
 
-    console.log("Reader refresh");
     let total = new Amount();
+    this.points = [];
     for (let sum of this.initialSums) {
-      maxVersion = Math.max(maxVersion, sum.version);
-      total.add(sum.amount);
+      maxVersion = Math.max(maxVersion, sum.getVersion());
+      total.add(sum.getAmount());
     }
     let last_end = total.dup();
 
-    for (let period of this._periods) {
+    for (let period of this.periods) {
       let periodAmount = new Amount();
-      for (let sum of period._sums) {
-        maxVersion = Math.max(maxVersion, sum.version);
-        periodAmount.add(sum.amount);
+      for (let sum of period.amounts) {
+        maxVersion = Math.max(maxVersion, sum.getVersion());
+        periodAmount.add(sum.getAmount());
       }
 
-      period.start_balance = last_end;
-      period.end_balance = last_end.dup();
-      period.end_balance.add(periodAmount);
-      period.delta = periodAmount;
+      let point = {
+        startDate: period.startDate,
+        endDate: period.endDate,
+        startBalance: last_end,
+        endBalance: last_end.dup(),
+        delta: periodAmount,
+      }
 
-      last_end = period.end_balance;
+      point.endBalance.add(periodAmount);
+
+      this.points.push(point);
+      last_end = point.endBalance;
     }
 
     if (maxVersion > this.version) {
@@ -2042,8 +2221,8 @@ class BalanceReader extends Reader {
     }
   }
 
-  periods() {
-    return this._periods;
+  getPoints(): Array<BalanceReaderPoint> {
+    return this.points;
   }
 
   release() {
@@ -2051,4 +2230,131 @@ class BalanceReader extends Reader {
   }
 }
 
-class EntryReader extends Reader {}
+/** EntryReader ***************************************************************/
+
+class EntryReaderEntry {
+  entry: Entry;
+  balance: Amount;
+}
+
+class EntryReaderOptions {
+  // Users must specify two of three of these options.
+
+  // How many transactions should be part of the sequence.
+  count: ?number;
+
+  // String format; one of:
+  //   YYYY-MM-DD
+  //   YYYY-MM-DD+N (to skip N entries after the beginning of this date).
+  startDate: ?string;
+
+  // String format; one of:
+  //   YYYY-MM-DD
+  //   YYYY-MM-DD-N (to skip N entries before the end of this date).
+  endDate: ?string;
+}
+
+class EntryReader extends Reader {
+  account: Account;
+  initialSums: Array<IGetAmount>;
+  list: EntryList;
+  entries: Array<EntryReaderEntry>;
+
+  startSkip: ?number;
+  endSkip: ?number;
+  count: ?number;
+
+  constructor(account, options: EntryReaderOptions) {
+    super(account);
+
+    let listOptions = new EntryListOptions();
+
+    let has = 0;
+
+    if (options.count) {
+      this.count = options.count;
+      listOptions.minCount = options.count;
+      has++;
+    }
+
+    if (options.startDate) {
+      let parts = options.startDate.split("+");
+      listOptions.startDate = DB.parseDate(parts[0]);
+      this.startSkip = parseInt(parts[1] || "0", 10);
+
+      // If the user asked us to skip some entries, we ask for extra entries
+      // from the list and skip over them.
+      listOptions.minCount += this.startSkip;
+      has++;
+    }
+
+    if (options.endDate) {
+      let parts = options.endDate.split("-");
+      listOptions.endDate = DB.parseDate(parts[0]);
+      this.endSkip = parseInt(parts[1] || "0", 10);
+
+      // If the user asked us to skip some entries, we ask for extra entries
+      // from the list and skip over them.
+      listOptions.minCount += this.endSkip;
+      has++;
+    }
+
+    if (has != 2) {
+      throw "Must provide two of: startDate, endDate, count";
+    }
+
+    this.list = new EntryList(account, listOptions);
+  }
+
+  _refresh() {
+    let entryListEntries = this.list.getEntries();
+    let entries = [];
+
+    if (entryListEntries.length == 0) {
+      return;
+    }
+
+    let initialSums = this.db._getAmountReadersForPeriod(
+        this.account, DateLimits.MIN_DATE, entryListEntries[0].getDate());
+    entries = [];
+
+    let balance = new Amount();
+
+    for (let sum of initialSums) {
+      balance.add(sum.getAmount());
+    }
+
+    for (let entry of this.list.getEntries()) {
+      balance.add(entry.getAmount());
+      entries.push(new EntryReaderEntry(entry, balance.dup()));
+    }
+
+    if (this.endSkip != null) {
+      entries.splice(-this.endSkip, this.endSkip);
+    }
+
+    if (this.startSkip != null) {
+      entries.splice(0, this.startSkip);
+    }
+
+    if (this.count != null) {
+      let excess = entries.length - this.count;
+
+      if (excess > 0) {
+        if (this.startSkip != null) {
+          throw "Unexpected: reader with startSkip / count had extra elems.";
+        } else {
+          // This is expected in the case that the EntryList returned extra
+          // entries at the beginning to give us the complete day's worth.
+          entries.splice(0, excess);
+        }
+      }
+    }
+
+    this.entries = entries;
+  }
+
+  getEntries(): Array<EntryReaderEntry> {
+    return this.entries;
+  }
+}

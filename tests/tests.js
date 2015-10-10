@@ -12,9 +12,6 @@ var act = function(data) {
   if (!data.type) {
     data.type = "ASSET";
   }
-  if (!data.commodity_guid) {
-    data.commodity_guid = "USD";
-  }
   return data;
 }
 
@@ -50,8 +47,8 @@ function getSingleArrayValue(array) {
 }
 
 function assertPointIsZero(point) {
-  qunit.ok(point.start_balance.isZero());
-  qunit.ok(point.end_balance.isZero());
+  qunit.ok(point.startBalance.isZero());
+  qunit.ok(point.endBalance.isZero());
 }
 
 function dbtest(name, func) {
@@ -279,7 +276,7 @@ dbtest("restore data from IDB", function(db, assert) {
     qunit.ok(sub, "sub-account exists");
 
     let done = assert.async();
-    let balance1 = a1.newBalanceReader({period: "FOREVER"});
+    let balance1 = a1.newBalanceReader({frequency: "FOREVER"});
     model.Observable.whenLoaded([balance1], function() {
       var fired1 = 0;
       balance1.subscribe(this, function() {
@@ -287,8 +284,8 @@ dbtest("restore data from IDB", function(db, assert) {
       });
 
       equal(fired1, 0, "callback hasn't been fired yet");
-      let val = getSingleArrayValue(balance1.periods());
-      equal(val.end_balance.toString(), "$1.00", "Balance is as expected");
+      let val = getSingleArrayValue(balance1.getPoints());
+      equal(val.endBalance.toString(), "$1.00", "Balance is as expected");
       done();
     });
   }, assert);
@@ -299,9 +296,9 @@ dbtest("balances", function(db, assert) {
   var account2 = db.createAccount(act({"name":"Test2"}));
   var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
 
-  let balance1 = account1.newBalanceReader({period: "FOREVER"});
-  var balance2 = account2.newBalanceReader({period: "FOREVER"})
-  var balanceSub = sub.newBalanceReader({period: "FOREVER"})
+  let balance1 = account1.newBalanceReader({frequency: "FOREVER"});
+  var balance2 = account2.newBalanceReader({frequency: "FOREVER"})
+  var balanceSub = sub.newBalanceReader({frequency: "FOREVER"})
 
   let done = assert.async();
 
@@ -328,9 +325,9 @@ dbtest("balances", function(db, assert) {
     equal(firedSub, 0);
     equal(fired2, 0);
 
-    assertPointIsZero(getSingleArrayValue(balance1.periods()));
-    assertPointIsZero(getSingleArrayValue(balance2.periods()));
-    assertPointIsZero(getSingleArrayValue(balanceSub.periods()));
+    assertPointIsZero(getSingleArrayValue(balance1.getPoints()));
+    assertPointIsZero(getSingleArrayValue(balance2.getPoints()));
+    assertPointIsZero(getSingleArrayValue(balanceSub.getPoints()));
 
     var txn1 = db.createTransaction({
       description: "Transaction 1",
@@ -345,18 +342,18 @@ dbtest("balances", function(db, assert) {
     equal(fired1, 1);
     equal(firedSub, 1);
     equal(fired2, 1);
-    equal(getSingleArrayValue(balance1.periods()).end_balance.toString(), "$1.00", "balance 1");
-    equal(getSingleArrayValue(balanceSub.periods()).end_balance.toString(), "$1.00", "balance 2");
-    equal(getSingleArrayValue(balance2.periods()).end_balance.toString(), "-$1.00", "balance 3");
+    equal(getSingleArrayValue(balance1.getPoints()).endBalance.toString(), "$1.00", "balance 1");
+    equal(getSingleArrayValue(balanceSub.getPoints()).endBalance.toString(), "$1.00", "balance 2");
+    equal(getSingleArrayValue(balance2.getPoints()).endBalance.toString(), "-$1.00", "balance 3");
 
     // Check readers created after transaction already exists.
-    var balanceSub2 = sub.newBalanceReader({period: "FOREVER"})
+    var balanceSub2 = sub.newBalanceReader({frequency: "FOREVER"})
     var firedSub2 = 0;
     balanceSub2.subscribe(this, function() {
       firedSub2++
     });
     equal(firedSub2, 0);
-    equal(getSingleArrayValue(balanceSub2.periods()).end_balance.toString(), "$1.00", "newly created reader works");
+    equal(getSingleArrayValue(balanceSub2.getPoints()).endBalance.toString(), "$1.00", "newly created reader works");
 
     // Update transaction and observe changes.
     txn1.update({
@@ -372,20 +369,59 @@ dbtest("balances", function(db, assert) {
     equal(fired2, 2, "check diq");
     equal(firedSub, 2, "check qox");
     equal(firedSub2, 1, "check ofh");
-    equal(getSingleArrayValue(balance1.periods()).end_balance.toString(), "$2.50", "txn update propagated 1");
-    equal(getSingleArrayValue(balanceSub.periods()).end_balance.toString(), "", "txn update propagated 2");
-    equal(getSingleArrayValue(balance2.periods()).end_balance.toString(), "-$2.50", "txn update propagated 3");
+    equal(getSingleArrayValue(balance1.getPoints()).endBalance.toString(), "$2.50", "txn update propagated 1");
+    equal(getSingleArrayValue(balanceSub.getPoints()).endBalance.toString(), "0", "txn update propagated 2");
+    equal(getSingleArrayValue(balance2.getPoints()).endBalance.toString(), "-$2.50", "txn update propagated 3");
 
     txn1.delete()
     equal(fired1, 3, "check xzy");
     equal(fired2, 3, "check zaa");
     equal(firedSub, 2, "check sdb");
     equal(firedSub2, 1, "check qeo");
-    equal(getSingleArrayValue(balance1.periods()).end_balance.toString(), "");
-    equal(getSingleArrayValue(balanceSub.periods()).end_balance.toString(), "");
-    equal(getSingleArrayValue(balance2.periods()).end_balance.toString(), "");
+    equal(getSingleArrayValue(balance1.getPoints()).endBalance.toString(), "0");
+    equal(getSingleArrayValue(balanceSub.getPoints()).endBalance.toString(), "0");
+    equal(getSingleArrayValue(balance2.getPoints()).endBalance.toString(), "0");
 
     done();
   });
 
+});
+
+dbtest("entries", function(db, assert) {
+  var account1 = db.createAccount(act({"name":"Test"}));
+  var account2 = db.createAccount(act({"name":"Test2"}));
+  var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
+
+  let opts = {count: 20, endDate: "2020-01-01"};
+  let entries1 = account1.newEntryReader(opts);
+  var entries2 = account2.newEntryReader(opts);
+  var entriesSub = sub.newEntryReader(opts);
+
+  let done = assert.async();
+
+  model.Observable.whenLoaded([entries1, entries2, entriesSub], function() {
+    qunit.ok(entries1, "successfully created entry reader");
+
+    var fired1 = 0;
+    var fired2 = 0;
+    var firedSub = 0;
+
+    entries1.subscribe(this, function() {
+      fired1++;
+    });
+
+    entries2.subscribe(this, function() {
+      fired2++;
+    });
+
+    entriesSub.subscribe(this, function() {
+      firedSub++;
+    });
+
+    equal(fired1, 0);
+    equal(firedSub, 0);
+    equal(fired2, 0);
+
+    done();
+  });
 });

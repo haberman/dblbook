@@ -150,6 +150,17 @@ var DblbookSubscribeMixin = {
   },
 };
 
+function importGnucash2(event) {
+  console.log("Import GnuCash: ", event);
+  let reader = new FileReader();
+  reader.onload = (function(e) {
+    importGnucash(reader.result, document.db);
+  });
+  reader.onerror = (function(e) {
+  });
+  reader.readAsText(event.target.files[0]);
+}
+
 /**
  * Component for rendering the accounts page.
  */
@@ -163,7 +174,7 @@ export var AccountPage = React.createClass({
       <br/>
       <br/>
       <div>
-        Upload a GnuCash file:<br/><input id="import" type="file" onChange={importGnucash} />
+        Upload a GnuCash file:<br/><input id="import" type="file" onChange={importGnucash2} />
       </div>
     </div>;
 
@@ -264,7 +275,7 @@ var AccountListElement = React.createClass({
   },
 
   renderBalance: function() {
-    var str = this.balance.periods()[0].toString();
+    var str = this.balance.periods()[0].end_balance.toString();
     return <span>{str}</span>;
   },
 
