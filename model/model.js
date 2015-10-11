@@ -2,11 +2,15 @@
  * @fileoverview Core data types for amounts, balances, currencies, etc.
  * Inspired by Ledger (http://ledger-cli.org).
  * @author jhaberman@gmail.com (Josh Haberman)
+ * @flow
  */
 
 "use strict";
 
+// $FlowIssue: how to allow this without processing all of node_modules/?
 import { RBTree } from 'bintrees';
+
+declare var indexedDB: any;
 
 function guid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -88,27 +92,35 @@ function rootForType(type) {
 /**
  * An ES6-compatible iterator for SortedMap.
  */
-class SortedMapIterator {
-  constructor(rbIter, nextFunc) {
+class SortedMapIterator<K, V> {
+  rbIter: any;       // The underlying RBTree iterator.
+  nextFunc: string;  // "next" or "prev" -- which function to call for the next item.
+  done: boolean;     // Whether we have reached EOF.
+
+  constructor(rbIter: any, nextFunc: string) {
     this.rbIter = rbIter;
     this.nextFunc = nextFunc;
     this.done = false;
   }
 
+  // $FlowIssue: 'computed property keys not supported'
   [Symbol.iterator]() {
     return this;
   }
 
-  next() {
+  next(): {done: boolean, value: ?[K, V]} {
     let item;
     if (this.done || (item = this.rbIter[this.nextFunc]()) == null) {
       this.done = true;
-      return {"done": true};
+      return {
+        done: true,
+        value: null,
+      };
     } else {
       return {
-        "value": item,
-        "done": false,
-      }
+        value: item,
+        done: false,
+      };
     }
   }
 }
@@ -118,10 +130,14 @@ class SortedMapIterator {
 /**
  * Sorted string -> value map.
  */
-class SortedMap {
+class SortedMap<K, V> {
+  tree: RBTree;
+  size: number;
+
   constructor() {
      this.tree = new RBTree(SortedMap._compare);
 
+  // $FlowIssue: 'Property not found in object literal'
     Object.defineProperty(this, "size", {
       "get": function() { return this.tree.size; }
     });
@@ -143,7 +159,7 @@ class SortedMap {
    * Sets the given key/value pair in the map, throwing an error if this key
    * is already in the map.
    */
-  add(key, val) {
+  add(key: K, val: V) {
     var ok = this.tree.insert([key, val]);
     if (!ok) {
       throw "Key was already present.";
@@ -154,7 +170,7 @@ class SortedMap {
    * Sets the given key/value pair in the map, overwriting any previous value
    * for "key".
    */
-  set(key, val) {
+  set(key: K, val: V) {
     this.tree.remove([key, null]);
     this.tree.insert([key, val]);
   }
@@ -163,21 +179,21 @@ class SortedMap {
    * Removes the given key from the map, if present.
    * for "key".
    */
-  delete(key) {
+  delete(key: K) {
     this.tree.remove([key, null]);
   }
 
   /**
    * Returns true if the given key is in the map.
    */
-  has(key) {
+  has(key: K): boolean {
     return this.tree.find([key, null]) != null;
   }
 
   /**
    * Returns the value for this key if it exists, otherwise null.
    */
-  get(key) {
+  get(key: K): ?V {
     var val = this.tree.find([key, null]);
     return val ? val[1] : null;
   }
@@ -185,14 +201,14 @@ class SortedMap {
   /**
    * Returns an iterator over the map's entries, in key order.
    */
-  iterator() {
+  iterator(): SortedMapIterator<K, V> {
     return new SortedMapIterator(this.tree.iterator(), "next");
   }
 
   /**
    * Returns an iterator over the map's entries, in reverse key order.
    */
-  riterator() {
+  riterator(): SortedMapIterator<K, V> {
     return new SortedMapIterator(this.tree.iterator(), "prev");
   }
 }
@@ -209,13 +225,17 @@ class SortedMap {
  * currency.  We can revisit this later if required.
  */
 class Decimal {
+  // The value is: value * 10^precision.
+  value: number;
+  precision: number;
+
   /**
    * Constructs a Decimal instance from decimal string.
    *
    * @param {String} value The decimal string (ie. "123.45").  The number of
    *   significant digits is noted, so "123.45" is different than "123.450".
    */
-  constructor(value) {
+  constructor(value: string) {
     let isNegative = false;
 
     if (value.charAt(0) == "-") {
@@ -298,18 +318,21 @@ class Decimal {
  * This can be directly converted to/from the Amount type in model.proto.
  */
 export class Amount {
+  commodities: Map<string, Decimal>;
+
+  // This is a map that parallels this.commodities, but collapses all lots
+  // into a single value that represents the entire currency.  Created lazily
+  // on-demand.
+  collapsed: ?Map<string, Decimal>;
+
   /**
    * Constructs a new Amount.
    *
    * @param{Amount || null} amount The Amount (from Amount.proto) to construct
    *   from.
    */
-  constructor(amount) {
+  constructor(amount: ?Object) {
     this.commodities = new Map();
-
-    // This is a map that parallels this.commodities, but collapses all lots
-    // into a single value that represents the entire currency.  Created lazily
-    // on-demand.
     this.collapsed = undefined;
 
     if (amount) {
@@ -319,7 +342,7 @@ export class Amount {
     }
   }
 
-  dup() {
+  dup(): Amount {
     let ret = new Amount();
     for (let [commodity, value] of this.commodities.entries()) {
       ret.commodities.set(commodity, value);
@@ -333,7 +356,7 @@ export class Amount {
    * Returns a plan JavaScript object for storing this Amount that follows the
    * Amount schema in model.proto.
    */
-  toModel() {
+  toModel(): Object {
     let ret = {}
     for (let [commodity, decimal] of this.commodities) {
       ret[commodity] = decimal.toString();
@@ -341,7 +364,7 @@ export class Amount {
     return ret;
   }
 
-  _apply(other, func) {
+  _apply(other: Amount, func: Function) {
     for (let [commodity, value] of other.commodities.entries()) {
       if (!this.commodities.has(commodity)) {
         this.commodities.set(commodity, value.newZero());
@@ -352,7 +375,7 @@ export class Amount {
 
       func.call(amt1, amt2);
 
-      if (amt1.isZero() && commodity != this.primary) {
+      if (amt1.isZero()) {
         this.commodities.delete(commodity);
       }
     }
@@ -362,7 +385,7 @@ export class Amount {
    * Adds the given amount to this one.
    * @param {Amount} amount The balance to add.
    */
-  add(other) {
+  add(other: Amount) {
     this._apply(other, Decimal.prototype.add);
   }
 
@@ -370,35 +393,36 @@ export class Amount {
    * Subtracts the given amount from this one.
    * @param {Amount} amount The balance to subtract.
    */
-  sub(other) {
+  sub(other: Amount) {
     this._apply(other, Decimal.prototype.sub);
   }
 
-  toString() {
-    var strs = new Array();
+  toString(): string {
+    var strs = [];
     for (let [commodity, val] of this.commodities) {
+      let valStr = val.toString();
+
       // Special-case commodities with common symbols.
       if (commodity == "USD") {
-        val = val.toString();
-        var isNegative = false;
-        if (val.substring(0, 1) == "-") {
+        let isNegative = false;
+        if (valStr.substring(0, 1) == "-") {
           isNegative = true;
-          val = val.substring(1);
+          valStr = valStr.substring(1);
         }
-        val = "$" + val;
+        valStr = "$" + valStr;
         if (isNegative) {
-          val = "-" + val;
+          valStr = "-" + valStr;
         }
-        strs.push(val);
+        strs.push(valStr);
       } else {
-        strs.push(val + " " + commodity);
+        strs.push(valStr + " " + commodity);
       }
     }
     var ret = strs.join(", ");
     return ret;
   }
 
-  isZero() {
+  isZero(): boolean {
     return this.commodities.size == 0;
   }
 
@@ -417,6 +441,12 @@ export class Amount {
 /** Period / SummingPeriod ****************************************************/
 
 class Period {
+  name: string;
+  roundDown: Function;
+  dateNext: Function;
+
+  static periods: Map<string, Period>;
+
   /**
    * Adds a period to the global list of available periods.
    * For use at startup time only.
@@ -427,11 +457,11 @@ class Period {
     period.roundDown = roundDown;
     period.dateNext = dateNext;
 
-    Period.periods[name] = period;
+    Period.periods.set(name, period);
   }
 }
 
-Period.periods = {};
+Period.periods = new Map();
 
 // Periods you can use when requesting Readers.
 // "FOREVER" is a special kind of period that we don't define here.
@@ -467,12 +497,19 @@ Period.add("DAY",
 
 
 class SummingPeriod extends Period {
+  aggregateKey: string;
+  strLength: number;
+  onBoundary: Function;
+
+  // FLOW BUG: gets confused if we name this 'periods'.
+  static periods2: Array<SummingPeriod>;
+
   /**
    * Adds a period to the global list of available summing periods.
    * For use at startup time only.
    */
-  static add(name, aggregateKey, strLength, onBoundary) {
-    let period = Period.periods[name];
+  static add2(name, aggregateKey: string, strLength, onBoundary) {
+    let period = Period.periods.get(name);
 
     if (!period) {
       throw "Must have previously been declared as a period.";
@@ -488,8 +525,8 @@ class SummingPeriod extends Period {
     new_period.strLength = strLength;
     new_period.onBoundary = onBoundary;
 
-    SummingPeriod.periods.push(new_period);
-    Period.periods[period.name] = new_period;
+    SummingPeriod.periods2.push(new_period);
+    Period.periods.set(period.name, new_period);
   }
 
   stringToDate(string) {
@@ -531,8 +568,8 @@ class SummingPeriod extends Period {
 
       // Iterate over the periods from coarsest to finest, so that we create the
       // shortest list of sum keys possible.
-      for (i = 0; i < SummingPeriod.periods.length; i++) {
-        let period = SummingPeriod.periods[i];
+      for (i = 0; i < SummingPeriod.periods2.length; i++) {
+        let period = SummingPeriod.periods2[i];
         let nextDate = period.dateNext(date);
         if (period.onBoundary(date) && nextDate <= endDate) {
           sum_keys.push(period.getSumKey(date));
@@ -541,7 +578,7 @@ class SummingPeriod extends Period {
         }
       }
 
-      if (i == SummingPeriod.periods.length) {
+      if (i == SummingPeriod.periods2.length) {
         throw "Not on a day boundary somehow?";
       }
 
@@ -564,13 +601,13 @@ class SummingPeriod extends Period {
   }
 }
 
-SummingPeriod.periods = [];
+SummingPeriod.periods2 = [];
 
 // Periods we internally aggregate by (must also be defined above).
 // Order is significant: must be listed biggest to smallest.
-SummingPeriod.add("YEAR",  "Y",  4, SummingPeriod.onYearBoundary);
-SummingPeriod.add("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
-SummingPeriod.add("DAY",   "D", 10, SummingPeriod.onDayBoundary);
+SummingPeriod.add2("YEAR",  "Y",  4, SummingPeriod.onYearBoundary);
+SummingPeriod.add2("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
+SummingPeriod.add2("DAY",   "D", 10, SummingPeriod.onDayBoundary);
 
 
 /** Observable ********************************************************/
@@ -582,6 +619,9 @@ SummingPeriod.add("DAY",   "D", 10, SummingPeriod.onDayBoundary);
  * to receive notification when the object changes.
  */
 export class Observable {
+  // Keys are subscribed objects, values are associated callback functions.
+  subscribers: Map<mixed, Function>;
+
   constructor() {
     this.subscribers = new Map();
   }
@@ -596,14 +636,14 @@ export class Observable {
    * not deliver change notifications when transactions are added to the account,
    * because transactions are not directly available from the Account object.
    */
-  subscribe(subscriber, callback) {
+  subscribe(subscriber: mixed, callback: Function) {
     this.subscribers.set(subscriber, callback);
   }
 
   /**
    * Unregisters any previously registered callback for this subscriber.
    */
-  unsubscribe(subscriber) { this.subscribers.delete(subscriber); }
+  unsubscribe(subscriber: mixed) { this.subscribers.delete(subscriber); }
 
   /**
    * Internal-only function for calling all subscribers that the object has
@@ -651,6 +691,22 @@ let ObjectStores = {
  * with DB.open below.
  */
 export class DB {
+  idb: any;
+
+  accountsByGuid: Map<string, Account>;
+  transactionsByTime: SortedMap<string, Transaction>;
+  transactionsByGuid: Map<string, Transaction>;
+  sumsByKey: SortedMap<string, Sum>;
+
+  readers: Set<Reader>;
+
+  atomicLevel: number;
+  dirtyMap: Map<string, Set<DbUpdater>>;
+  committing: number;
+  version: number;
+
+  static singleton: DB;
+
   /**
    * Constructor is not public: clients should obtain new DB instances with
    * DB.open() below.
@@ -821,7 +877,7 @@ export class DB {
    * Closes the DB object.  After this returns, you may not call any mutating
    * methods.
    */
-  close(account) {
+  close() {
     this.idb.close();
   }
 
@@ -847,7 +903,7 @@ export class DB {
    *
    * @param txn Data for a transaction (as in model.proto).
    */
-  transactionIsValid(txnData) {
+  transactionIsValid(txnData: Object): boolean {
     if (!Transaction.isValid(txnData)) {
       return false;
     }
@@ -871,20 +927,16 @@ export class DB {
    * a single transaction.  This lets us ensure that all related updates are
    * committed atomically.
    */
-  _addDirty(obj, collection) {
-    console.log("Add dirty");
+  _addDirty(obj: Object, collection: string) {
     let collectionSet = this.dirtyMap.get(collection);
 
     if (!collectionSet) {
-    console.log("Add dirty 2");
       collectionSet = new Set();
       this.dirtyMap.set(collection, collectionSet);
     }
 
     collectionSet.add(obj);
-    console.log("Add dirty 3");
     if (this.atomicLevel == 0) {
-    console.log("Add dirty 4");
       this._commit();
     }
   }
@@ -944,7 +996,7 @@ export class DB {
     }
   }
 
-  static _getDbKey(data, collection) {
+  static _getDbKey(data: Object, collection): string {
     let key = ObjectStores[collection];
     if (!key) {
       throw "Unknown collection name";
@@ -967,7 +1019,7 @@ export class DB {
    * For this reasons, it pays to wrap a batch of mutations in DB.atomic().
    * DB.atomic() is safe to nest.
    */
-  atomic(func) {
+  atomic(func: Function) {
     this.atomicLevel++;
     func();
     if (--this.atomicLevel == 0) {
@@ -985,7 +1037,9 @@ export class DB {
    *
    * @param accountData Data for the account to add (to match model.proto).
    */
-  createAccount(accountData) { return new Account(this, accountData); }
+  createAccount(accountData: Object): Account {
+    return new Account(this, accountData);
+  }
 
   /**
    * Adds a transaction.  The transaction must be valid.  The guid should not
@@ -993,7 +1047,9 @@ export class DB {
    *
    * @param txnData The transaction to add.
    */
-  createTransaction(txnData) { return new Transaction(this, txnData); }
+  createTransaction(txnData: Object): Transaction {
+    return new Transaction(this, txnData);
+  }
 
   /**
    * Returns the root of the real account tree.
@@ -1004,7 +1060,7 @@ export class DB {
    *
    * @return {Account} The root of the real account tree.
    */
-  getRealRoot() {
+  getRealRoot(): Account {
     return this.accountsByGuid.get("REAL_ROOT");
   }
 
@@ -1017,7 +1073,7 @@ export class DB {
    *
    * @return {Account} The root of the nominal account tree.
    */
-  getNominalRoot() {
+  getNominalRoot(): Account {
     return this.accountsByGuid.get("NOMINAL_ROOT");
   }
 
@@ -1027,7 +1083,7 @@ export class DB {
    * Since all accounts are loaded at all times, the account is returned
    * directly (not a promise).
    */
-  getAccountByGuid(guid) {
+  getAccountByGuid(guid: string): ?Account {
     return this.accountsByGuid.get(guid);
   }
 
@@ -1036,42 +1092,31 @@ export class DB {
    * need to be loaded first.  If the transaction exists, the promise succeeds
    * and yields the transaction, otherwise the promise fails.
    */
-  getTransactionByGuid(guid) {
+  getTransactionByGuid(guid: string): Promise<Transaction> {
     return new Promise(function(resolve, reject) {
-      let cached = this.transactionsByGuid[guid];
-      if (cached) {
-        resolve(cached);
-      } else {
-        var dbTxn = db.idb.transaction("transactions", "readonly");
-
-        request = dbTxn.objectStore("transactions").get(guid);
-        request.onsuccess = function(event) {
-          resolve(new Transaction(db, event.target.result, true));
-        }
-        request.onfailure = function(event) {
-          console.log("Error loading transaction", event);
-          reject(new Error("Error loading transaction", event));
-        }
-      }
+      // At the moment we keep all transactions loaded at all times.
+      resolve(this.transactionsByGuid.get(guid));
     });
   }
 
-  _getSumByKey(account, periodKey) {
+  _getSumByKey(account:Account, periodKey:string): Sum {
     let key = account.data.guid + ";" + periodKey;
-    if (this.sumsByKey.has(key)) {
-      return this.sumsByKey.get(key);
+    let ret = this.sumsByKey.get(key);
+    if (ret) {
+      return ret;
     } else {
-      let ret = new Sum(this, key)
+      ret = new Sum(this, key)
       this.sumsByKey.set(key, ret);
       return ret;
     }
   }
 
-  _getSum(account, date, period) {
+  _getSum(account: Account, date: Date, period: SummingPeriod): Sum {
     return this._getSumByKey(account, period.getSumKey(period.roundDown(date)));
   }
 
-  _getSumsForAccountPeriod(account, startDate, endDate) {
+  _getSumsForAccountPeriod(account: Account,
+                           startDate: Date, endDate: Date): Array<Sum> {
     return SummingPeriod.getSumKeysForRange(startDate, endDate).map(
       (key) => this._getSumByKey(account, key)
     );
@@ -1088,11 +1133,25 @@ let ObjectStates = {
   DELETED: 4
 };
 
+class DbObject extends Observable {
+  db: DB;
+  dbUpdater: DbUpdater;
+  version: number;
+
+  toModel(): Object { return {}; }
+}
+
 /**
  * Internal class used by DB-backed objects (Account, Transaction, Sum) to flush
  * changes to the DB.
  */
 class DbUpdater {
+  db: DB;
+  collection: string;
+  obj: DbObject;
+  state: number;
+  key: string;
+
   constructor(db, collection, obj, existsInDb) {
     this.db = db;
     this.collection = collection;
@@ -1169,7 +1228,7 @@ class DbUpdater {
       let key = DB._getDbKey(this.obj.toModel(), this.collection);
 
       if (key != this.key) {
-        console.log("Old key: ", this.lastKey, "New key: ", key);
+        console.log("Old key: ", this.key, "New key: ", key);
         throw "Update should not change key!";
       }
     }
@@ -1224,13 +1283,17 @@ class DbUpdater {
  * balance data about the account.  For that, create a Reader and subscribe
  * to it.
  */
-export class Account extends Observable {
+export class Account extends DbObject {
+  data: Object;
+  parent: ?Account;
+  children: SortedMap<string, Account>;
+
   /**
    * Constructor is not public: clients should create new accounts with
    * db.createAccount().  This constructor is for use of the DB only.
    * @private
    */
-  constructor(db, data, existsInDb) {
+  constructor(db: DB, data: Object, existsInDb: ?boolean) {
     super();
 
     this.db = db;
@@ -1268,14 +1331,15 @@ export class Account extends Observable {
     this.db.accountsByGuid.set(data.guid, this);
 
     if (this.parent) {
-      this.parent.children.set(data.name, this);
-      this.parent._notifySubscribers();
+      let parent = this.parent;
+      parent.children.set(data.name, this);
+      parent._notifySubscribers();
     }
 
     this.dbUpdater = new DbUpdater(db, "accounts", this, existsInDb);
   }
 
-  toModel() { return this.data; }
+  toModel(): Object { return this.data; }
 
   /**
    * Returns true if the given account is valid in isolation.
@@ -1296,7 +1360,7 @@ export class Account extends Observable {
   /**
    * Updates an account with the given data.
    */
-  update(newData) {
+  update(newData: Object) {
     this.dbUpdater.checkOkToUpdate();
 
     if (!Account.isValid(newData)) {
@@ -1332,6 +1396,10 @@ export class Account extends Observable {
         throw "account already exists with this name";
       }
 
+      if (!oldParent) {
+        throw "cannot reparent root account.";
+      }
+
       oldParent.children.delete(this.data.name);
       newParent.children.set(newData.name, this);
 
@@ -1362,8 +1430,9 @@ export class Account extends Observable {
     //}
 
     if (this.parent) {
-      this.parent.children.delete(this.data.name);
-      this.parent._notifySubscribers();
+      let parent = this.parent;
+      parent.children.delete(this.data.name);
+      parent._notifySubscribers();
       // TODO:
       // Should we notify the account itself?
       // Then any view that depends on it could just
@@ -1409,12 +1478,15 @@ export class Account extends Observable {
    *   // including future (ie. speculative) transactions.
    *
    *   // Frequency of points.
-   *   // Valid values are: "DAY", "WEEK", "MONTH", "QUARTER", "YEAR", "FOREVER".
+   *   // Valid values are: "DAY", "WEEK", "MONTH", "QUARTER", "YEAR",
+   *                        "FOREVER".
    *   // "FOREVER" is only valid when count = 1.
    *   "frequency": "FOREVER",
    * }
    */
-  newBalanceReader(options) { return new BalanceReader(this, options); }
+  newBalanceReader(options: Object): BalanceReader {
+    return new BalanceReader(this, options);
+  }
 
   /**
    * Returns a new EntryReader that vends a sequence of Entry objects for this
@@ -1446,7 +1518,7 @@ export class Account extends Observable {
    * changes.  The actual *contents* of the transactions are not monitored; to
    * keep track of those, subscribe to the contained Transactions themselves.
    */
-  newEntryReader(options) {
+  newEntryReader(options: Object): EntryReader {
     var defaults = {
       type: "transaction",
       count: 20,
@@ -1466,10 +1538,17 @@ export class Account extends Observable {
  * Class that represents the sum of all entry amounts for a particular account
  * (and its children) over a window of time.
  *
- * This class is internal-only.
+ * This class is internal-only.  It is not actually observable despite deriving
+ * DbObject < Observable (we're compensating a lack of multiple inheritance).
  */
-class Sum {
+class Sum extends DbObject {
+  key: string;
+  amount: Amount;
+  count: number;
+
   constructor(db, key, data) {
+    super();
+
     this.db = db;
     this.key = key;
 
@@ -1533,6 +1612,13 @@ class Sum {
  * so we'll always create more Entry objects than the DB has.
  */
 class Entry {
+  txn: Transaction;
+  account: Account;
+  description: string;
+  data: Object;
+  amount: Amount;
+  sums: Array<Sum>;
+
   /**
    * Constructor is not public: clients can create Transaction objects (with
    * entry data) which will internally create Entry objects.
@@ -1547,7 +1633,7 @@ class Entry {
     this.account = account;
     this.description = description;
     this.amount = new Amount();
-    this.sums = SummingPeriod.periods.map(
+    this.sums = SummingPeriod.periods2.map(
       (p) => txn.db._getSum(account, txn.date, p)
     );
   }
@@ -1583,7 +1669,7 @@ class Entry {
    *                  Transaction).
    */
   getDescription() {
-    return this.entryData.description || this.txn.data.description;
+    return this.data.description || this.txn.data.description;
   }
 }
 
@@ -1596,26 +1682,29 @@ class Entry {
  * - db: link back to the database
  * - data: the raw data for this Transaction (as in model.proto)
  */
-export class Transaction extends Observable {
+export class Transaction extends DbObject {
+  data: Object;
+  date: Date;
+  entries: Map<Account, Entry>;
+
   /**
    * Constructor is not public: clients should create new transactions with
    * db.createTransaction().  This constructor is for use of the DB only.
    * @private
    */
-  constructor(db, txnData, existsInDb) {
+  constructor(db: DB, txnData: Object, existsInDb: ?boolean) {
     super()
 
     this.db = db;
     this.data = txnData;
     this.date = new Date(txnData.date);
-    this.existsInDb = existsInDb;
 
     if (!this.db.transactionIsValid(txnData)) {
       throw "invalid transaction";
     }
 
     if (txnData.guid) {
-      if (this.db.transactionsByGuid[txnData.guid]) {
+      if (this.db.transactionsByGuid.get(txnData.guid)) {
         throw "Tried to duplicate existing transaction.";
       }
     } else {
@@ -1633,7 +1722,7 @@ export class Transaction extends Observable {
     });
   }
 
-  toModel() { return this.data; }
+  toModel(): Object { return this.data; }
 
   /**
    * If the transaction is unbalanced, returns the unbalanced balance.
@@ -1654,12 +1743,16 @@ export class Transaction extends Observable {
   }
 
 
-  _createEntries(add) {
+  _createEntries(add: boolean) {
     this.entries = new Map();
 
     for (let i in this.data.entry) {
       let entryData = this.data.entry[i];
       let account = this.db.accountsByGuid.get(entryData.account_guid);
+
+      if (!account) {
+        throw "Account doesn't exist?";
+      }
 
       // We create Entry objects for every parent account.
       // ie. even if the entry data in the txn only *explicitly* specifies
@@ -1674,7 +1767,14 @@ export class Transaction extends Observable {
         }
 
         entry._addAmount(new Amount(entryData.amount));
-      } while ((account = account.parent) != null);
+      // FLOW BUG -- this isn't accepted:
+      // } while ((account = account.parent) != null);
+        if (account.parent) {
+          account = account.parent;
+        } else {
+          break;
+        }
+      } while (true);
 
     }
 
@@ -1727,7 +1827,7 @@ export class Transaction extends Observable {
    * transaction must be valid.  This will completely overwrite the previous
    * value of this transaction.
    */
-  update(newData) {
+  update(newData: Object) {
     console.log("Transaction update");
     this.dbUpdater.checkOkToUpdate();
 
@@ -1782,10 +1882,10 @@ export class Transaction extends Observable {
   }
 
   /**
-   * Internal only method to calculate the key for this transaction in the sorted
-   * map.
+   * Internal only method to calculate the key for this transaction in the
+   * sorted map.
    */
-  _byTimeKey() {
+  _byTimeKey(): string {
     return this.data.date + this.data.guid;
   }
 }
@@ -1801,7 +1901,16 @@ let DateLimits = {
   MAX_DATE: new Date("2020/01/01"),
 };
 
-class BalanceReader extends Observable {
+class Reader extends Observable {
+  _refresh() {}
+}
+
+class BalanceReader extends Reader {
+  db: DB;
+  _periods: Array<Object>;
+  initialSums: Array<Sum>;
+  version: number;
+
   constructor(account, options) {
     super();
 
@@ -1820,18 +1929,19 @@ class BalanceReader extends Observable {
     this.db = account.db;
     this.db.readers.add(this);
 
-    this.periods = [];
+    this._periods = [];
     this.version = 0;
 
     if (options.period == "FOREVER") {
       if (options.count && options.count != 1) {
         throw "FOREVER period requires count == 1 (or omit it)";
       }
-      this.periods.push({
+      this._periods.push({
         start_date: DateLimits.MIN_DATE,
         end_date: DateLimits.MAX_DATE,
       });
     } else {
+      /*
       let step, date;
 
       if (options.start_date) {
@@ -1885,15 +1995,16 @@ class BalanceReader extends Observable {
         // So the points are in forwards chronological order.
         this.periods.reverse();
       }
+      */
     }
 
-    for (let period of this.periods) {
+    for (let period of this._periods) {
       period._sums = this.db._getSumsForAccountPeriod(
           account, period.start_date, period.end_date);
     }
 
     this.initialSums = this.db._getSumsForAccountPeriod(
-        account, DateLimits.MIN_DATE, this.periods[0].start_date);
+        account, DateLimits.MIN_DATE, this._periods[0].start_date);
 
     this._refresh();
   }
@@ -1910,7 +2021,7 @@ class BalanceReader extends Observable {
     }
     let last_end = total.dup();
 
-    for (let period of this.periods) {
+    for (let period of this._periods) {
       let periodAmount = new Amount();
       for (let sum of period._sums) {
         maxVersion = Math.max(maxVersion, sum.version);
@@ -1932,10 +2043,12 @@ class BalanceReader extends Observable {
   }
 
   periods() {
-    return this.periods;
+    return this._periods;
   }
 
   release() {
     this.db.readers.delete(this);
   }
 }
+
+class EntryReader extends Reader {}
