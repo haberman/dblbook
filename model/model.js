@@ -19,6 +19,10 @@ function guid() {
   });
 }
 
+function toMapDate(date) {
+  return date.toISOString().substr(0, 10);
+}
+
 function isArray(val) {
   // cf. http://stackoverflow.com/questions/4775722/check-if-object-is-array
   return Object.prototype.toString.call(val) === '[object Array]';
@@ -108,18 +112,21 @@ class SortedMapIterator<K, V> {
 
   // $FlowIssue: It doesn't like what's going on here.
   next() {
-    let item;
-    if (this.done || (item = this.rbIter[this.nextFunc]()) == null) {
-      this.done = true;
-      return {
-        done: true,
-        value: null,
+    let item = this.rbIter.data();
+
+    if (item) {
+      let ret = {
+        value: item,
+        done: false
       };
+
+      this.rbIter[this.nextFunc]();
+
+      return ret;
     } else {
       return {
-        value: item,
-        done: false,
-      };
+        done: true
+      }
     }
   }
 }
@@ -206,7 +213,9 @@ class SortedMap<K, V> {
     if (key) {
       return new SortedMapIterator(this.tree.lowerBound([key, null]), "next");
     } else {
-      return new SortedMapIterator(this.tree.iterator(), "next");
+      let iter = this.tree.iterator();
+      iter.next();  // Advance from null iterator to one pointing at first elem.
+      return new SortedMapIterator(iter, "next");
     }
   }
 
@@ -220,7 +229,9 @@ class SortedMap<K, V> {
       iter.next();  // Skip element after this key.
       return iter;
     } else {
-      return new SortedMapIterator(this.tree.iterator(), "prev");
+      let iter = this.tree.iterator();
+      iter.prev();  // Advance from null iterator to one pointing at last elem.
+      return new SortedMapIterator(iter, "prev");
     }
   }
 }
@@ -281,6 +292,13 @@ class Decimal {
       throw "Precisions must be the same."
     }
     this.value += other.value;
+  }
+
+  dup() {
+    let ret = new Decimal("0");
+    ret.value = this.value;
+    ret.precision = this.precision;
+    return ret;
   }
 
   /**
@@ -357,7 +375,7 @@ export class Amount {
   dup(): Amount {
     let ret = new Amount();
     for (let [commodity, value] of this.commodities.entries()) {
-      ret.commodities.set(commodity, value);
+      ret.commodities.set(commodity, value.dup());
     }
 
     // TODO: copy collapsed
@@ -618,8 +636,8 @@ SummingPeriod.periods2 = [];
 // Periods we internally aggregate by (must also be defined above).
 // Order is significant: must be listed biggest to smallest.
 SummingPeriod.add2("YEAR",  "Y",  4, SummingPeriod.onYearBoundary);
-//SummingPeriod.add2("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
-//SummingPeriod.add2("DAY",   "D", 10, SummingPeriod.onDayBoundary);
+SummingPeriod.add2("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
+SummingPeriod.add2("DAY",   "D", 10, SummingPeriod.onDayBoundary);
 
 
 /** Observable ********************************************************/
@@ -955,7 +973,6 @@ export class DB {
 
   _commit() {
     if (this.dirtyMap.size == 0) {
-      console.log("WEIRD!");
       return;
     }
 
@@ -1138,6 +1155,7 @@ export class DB {
   _getAmountReadersForPeriod(account: Account,
                              startDate: Date,
                              endDate: Date): Array<IGetAmount> {
+    // TODO: update so that it can work without day sums.
     return SummingPeriod.getSumKeysForRange(startDate, endDate).map(
       (key) => this._getSumByKey(account, key).toIGetAmount()
     );
@@ -1482,7 +1500,7 @@ export class Account extends DbObject {
   /**
    * Returns a new EntryReader that vends a sequence of Entry objects for this
    */
-  newEntryReader(options: Object): EntryReader {
+  newEntryReader(options: EntryReaderOptions): EntryReader {
     return new EntryReader(this, options);
   }
 
@@ -1506,7 +1524,6 @@ export class Account extends DbObject {
 class Entry {
   txn: Transaction;
   account: Account;
-  description: string;
   data: Object;
   amount: Amount;
   sums: Array<Sum>;
@@ -1520,10 +1537,10 @@ class Entry {
    *                        from the database.  This will update the appropriate
    *                        sums.
    */
-  constructor(txn, account, description) {
+  constructor(txn, account, data) {
     this.txn = txn;
     this.account = account;
-    this.description = description;
+    this.data = data;
     this.amount = new Amount();
     this.sums = SummingPeriod.periods2.map(
       (p) => txn.db._getSum(account, txn.date, p)
@@ -1728,7 +1745,9 @@ export class Transaction extends DbObject {
    * TODO(haberman): will need to add a date parameter if/when transactions
    * can have multiple entries for the same account, but on different days.
    */
-  getEntry(account: Account) {}
+  getEntry(account: Account): Entry {
+    return this.entries.get(account);
+  }
 
   /**
    * Returns the date of this transaction.
@@ -1923,6 +1942,8 @@ class EntryList {
     if (has != 2) {
       throw "Must specify 2 of: minCount, startDate, endDate";
     }
+
+    this._refresh();
   }
 
   /**
@@ -1959,9 +1980,17 @@ class EntryList {
       // All cases except [endDate, count].
       // Iterate forwards, adding entries until we hit our stop criterion.
       //
+      let iter =
+          this.db.transactionsByTime.iterator(toMapDate(options.startDate));
       // $FlowIssue: Doesn't recognize the iterator.
-      for (let txn of this.db.transactionsByTime.iterator(options.startDate)) {
+      for (let [key, txn] of iter) {
         let entry = txn.getEntry(this.account);
+
+        if (entry == null) {
+          // TODO: should base date-based termination on key so that we can
+          // potentially break even without an entry.
+          continue;
+        }
 
         if ((options.endDate && entry.getDate() > options.endDate) ||
             (options.minCount && options.minCount == this.entries.length)) {
@@ -1973,12 +2002,23 @@ class EntryList {
     } else {
       // The case of [endDate, count].
       // Iterate backwards, adding entries until we hit our minCount.
+      if (!options.endDate) {
+        throw "Shoulnd't happen."
+      }
 
       let firstDate = null;
 
+      let iter =
+          this.db.transactionsByTime.riterator(toMapDate(options.endDate));
       // $FlowIssue: Doesn't recognize the iterator.
-      for (let txn of this.db.transactionsByTime.riterator(this.endDate)) {
+      for (let [key, txn] of iter) {
         let entry = txn.getEntry(this.account);
+
+        if (entry == null) {
+          // TODO: should base date-based termination on key so that we can
+          // potentially break even without an entry.
+          continue;
+        }
 
         if (firstDate && entry.getDate() < firstDate) {
           break;
@@ -2018,6 +2058,7 @@ class Reader extends Observable {
 
     this.db = account.db;
     this.db.readers.add(this);
+    this.account = account;
   }
 
   _refresh() {}
@@ -2235,6 +2276,11 @@ class BalanceReader extends Reader {
 class EntryReaderEntry {
   entry: Entry;
   balance: Amount;
+
+  constructor(entry: Entry, balance: Amount) {
+    this.entry = entry;
+    this.balance = balance;
+  }
 }
 
 class EntryReaderOptions {
@@ -2255,7 +2301,6 @@ class EntryReaderOptions {
 }
 
 class EntryReader extends Reader {
-  account: Account;
   initialSums: Array<IGetAmount>;
   list: EntryList;
   entries: Array<EntryReaderEntry>;
@@ -2304,11 +2349,12 @@ class EntryReader extends Reader {
     }
 
     this.list = new EntryList(account, listOptions);
+    this._refresh();
   }
 
   _refresh() {
     let entryListEntries = this.list.getEntries();
-    let entries = [];
+    this.entries = [];
 
     if (entryListEntries.length == 0) {
       return;
@@ -2316,7 +2362,6 @@ class EntryReader extends Reader {
 
     let initialSums = this.db._getAmountReadersForPeriod(
         this.account, DateLimits.MIN_DATE, entryListEntries[0].getDate());
-    entries = [];
 
     let balance = new Amount();
 
@@ -2326,19 +2371,19 @@ class EntryReader extends Reader {
 
     for (let entry of this.list.getEntries()) {
       balance.add(entry.getAmount());
-      entries.push(new EntryReaderEntry(entry, balance.dup()));
+      this.entries.push(new EntryReaderEntry(entry, balance.dup()));
     }
 
     if (this.endSkip != null) {
-      entries.splice(-this.endSkip, this.endSkip);
+      this.entries.splice(-this.endSkip, this.endSkip);
     }
 
     if (this.startSkip != null) {
-      entries.splice(0, this.startSkip);
+      this.entries.splice(0, this.startSkip);
     }
 
     if (this.count != null) {
-      let excess = entries.length - this.count;
+      let excess = this.entries.length - this.count;
 
       if (excess > 0) {
         if (this.startSkip != null) {
@@ -2346,12 +2391,10 @@ class EntryReader extends Reader {
         } else {
           // This is expected in the case that the EntryList returned extra
           // entries at the beginning to give us the complete day's worth.
-          entries.splice(0, excess);
+          this.entries.splice(0, excess);
         }
       }
     }
-
-    this.entries = entries;
   }
 
   getEntries(): Array<EntryReaderEntry> {

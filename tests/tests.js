@@ -388,40 +388,127 @@ dbtest("balances", function(db, assert) {
 });
 
 dbtest("entries", function(db, assert) {
-  var account1 = db.createAccount(act({"name":"Test"}));
-  var account2 = db.createAccount(act({"name":"Test2"}));
-  var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
+  let salary = db.createAccount({
+    name: "Salary",
+    type: "INCOME"
+  });
 
-  let opts = {count: 20, endDate: "2020-01-01"};
-  let entries1 = account1.newEntryReader(opts);
-  var entries2 = account2.newEntryReader(opts);
-  var entriesSub = sub.newEntryReader(opts);
+  let food = db.createAccount({
+    name: "Food",
+    type: "EXPENSE"
+  });
+
+  let groceries = db.createAccount({
+    name: "Groceries",
+    type: "EXPENSE",
+    parent_guid: food.data.guid
+  });
+
+  let restaurants = db.createAccount({
+    name: "Restaurants",
+    type: "EXPENSE",
+    parent_guid: food.data.guid
+  });
+
+  let checking = db.createAccount({
+    name: "Checking",
+    type: "ASSET"
+  });
+
+  let paycheckTxn = db.createTransaction({
+    description: "Paycheck",
+    date: "2015-09-23",
+    entry: [
+      {"account_guid": salary.data.guid, "amount": {"USD": "-1000.00"}},
+      {"account_guid": checking.data.guid, "amount": {"USD": "1000.00"}},
+    ]
+  });
+
+  let groceriesTxn = db.createTransaction({
+    description: "Groceries at Safeway",
+    date: "2015-09-25",
+    entry: [
+      {"account_guid": checking.data.guid, "amount": {"USD": "-123.45"}},
+      {"account_guid": groceries.data.guid, "amount": {"USD": "123.45"}},
+    ]
+  });
+
+  let pizzaHutTxn = db.createTransaction({
+    description: "Dinner at Pizza Hut",
+    date: "2015-09-27",
+    entry: [
+      {"account_guid": checking.data.guid, "amount": {"USD": "-45.20"}},
+      {"account_guid": restaurants.data.guid, "amount": {"USD": "45.20"}},
+    ]
+  });
+
+  // Added out of order.
+  let dinnerTxn = db.createTransaction({
+    description: "Dinner with takeout",
+    date: "2015-09-26",
+    entry: [
+      {"account_guid": checking.data.guid, "amount": {"USD": "-60.00"}},
+      {"account_guid": restaurants.data.guid, "amount": {"USD": "40.00"}},
+      {"account_guid": groceries.data.guid, "amount": {"USD": "20.00"}},
+    ]
+  });
+
+  let groceriesEntries = groceries.newEntryReader({
+    startDate: "2015-09-22",
+    count: 8
+  });
+  let realEntries = db.getRealRoot().newEntryReader({
+    startDate: "2015-09-22",
+    count: 5
+  });
+  let shortRealEntries = db.getRealRoot().newEntryReader({
+    startDate: "2015-09-27",
+    count: 2
+  });
+
+  /*
+  let groceriesBalances = groceries.newBalanceReader({
+    startDate: "2015-09-22",
+    frequency: "DAY",
+    count: 8
+  });
+  let realBalances = db.getRealRoot().newBalanceReader({
+    startDate: "2015-09-22",
+    frequency: "DAY",
+    count: 8
+  });
+  */
 
   let done = assert.async();
 
-  model.Observable.whenLoaded([entries1, entries2, entriesSub], function() {
-    qunit.ok(entries1, "successfully created entry reader");
+  function assertEntries(entries, expectedEntries) {
+    assert.equal(entries.length, expectedEntries.length);
+    for (let i = 0; i < Math.min(entries.length, expectedEntries.length); i++) {
+      let entry = entries[i];
+      let [entryAmount, balance, txn] = expectedEntries[i];
+      assert.deepEqual(entry.entry.amount.toString(), entryAmount);
+      assert.deepEqual(entry.balance.toString(), balance);
+      assert.equal(entry.entry.txn, txn);
+    }
+  }
 
-    var fired1 = 0;
-    var fired2 = 0;
-    var firedSub = 0;
+  model.Observable.whenLoaded([groceriesEntries,
+                               realEntries,
+                               shortRealEntries/*,
+                               groceriesBalances,
+                               realBalances*/], function() {
+    let entries = realEntries.getEntries();
+    assertEntries(realEntries.getEntries(), [
+      ["$1000.00", "$1000.00", paycheckTxn],
+      ["-$123.45", "$876.55", groceriesTxn],
+      ["-$60.00", "$816.55", dinnerTxn],
+      ["-$45.20", "$771.35", pizzaHutTxn],
+    ]);
 
-    entries1.subscribe(this, function() {
-      fired1++;
-    });
-
-    entries2.subscribe(this, function() {
-      fired2++;
-    });
-
-    entriesSub.subscribe(this, function() {
-      firedSub++;
-    });
-
-    equal(fired1, 0);
-    equal(firedSub, 0);
-    equal(fired2, 0);
-
+    entries = shortRealEntries.getEntries();
+    assertEntries(shortRealEntries.getEntries(), [
+      ["-$45.20", "$771.35", pizzaHutTxn],
+    ]);
     done();
   });
 });
