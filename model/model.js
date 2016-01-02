@@ -477,8 +477,9 @@ export class Amount {
 
 class Period {
   name: string;
-  roundDown: Function;
-  dateNext: Function;
+  roundDown: (date: Date) => Date;
+  dateNext: (date: Date) => Date;
+  datePrev: (date: Date) => Date;
 
   static periods: Map<string, Period>;
 
@@ -491,8 +492,17 @@ class Period {
     period.name = name;
     period.roundDown = roundDown;
     period.dateNext = dateNext;
+    period.datePrev = function(d) {
+      let roundedDown = roundDown(d);
+      roundedDown.setMilliseconds(-1);
+      return roundDown(roundedDown);
+    }
 
     Period.periods.set(name, period);
+  }
+
+  static getPeriod(name) {
+    return this.periods.get(name);
   }
 }
 
@@ -2097,8 +2107,8 @@ class BalanceReaderOptions {
 
   // Specify either startDate OR endDate (but not both).
   // The first (or last) period of the series will include this date.
-  startDate: Date;
-  endDate: Date;
+  startDate: ?(Date | string);
+  endDate: ?(Date | string);
 
   // TODO: add an "exclude future transactions" flag?
   // That would let users get an "year-to-date" value (for example) without
@@ -2145,6 +2155,15 @@ class BalanceReader extends Reader {
     this.periods = [];
     this.version = 0;
 
+    let startDate = options.startDate;
+    let endDate = options.endDate;
+    if (typeof startDate == "string") {
+      startDate = DB.parseDate(startDate);
+    }
+    if (typeof endDate == "string") {
+      endDate = DB.parseDate(endDate);
+    }
+
     if (options.frequency == "FOREVER") {
       if (options.count && options.count != 1) {
         throw "FOREVER frequency requires count == 1 (or omit it)";
@@ -2155,61 +2174,53 @@ class BalanceReader extends Reader {
         amounts: [],
       });
     } else {
-      /*
-      let step, date;
+      let period = Period.getPeriod(options.frequency);
 
-      if (options.startDate) {
-        if (options.endDate) {
-          throw "Specifying both start and end date isn't supported yet.";
+      if (!period) {
+        throw "Unknown frequency: " + options.frequency;
+      }
+
+      if (startDate) {
+        // startDate, count or
+        // startDate, endDate
+        var date = startDate;
+
+        while (1) {
+          if (options.count && this.periods.length >= options.count) {
+            break;
+          } else if (endDate && date > endDate) {
+            break;
+          }
+
+          let next = period.dateNext(date);
+          this.periods.push({
+            startDate: date,
+            endDate: next,
+            amounts: [],
+          });
+
+          date = next;
         }
-        date = options.startDate;
-        step = 1;
       } else {
-        if (!options.endDate) {
-          throw "Must specify one of startDate, endDate";
+        // endDate, count
+        if (!endDate) {
+          throw "endDate should be provided here."
         }
-        date = options.endDate;
-        step = -1;
-      }
 
-      if (!options.count) {
-        throw "Must specify count (for now).";
-      }
+        var date = endDate;
+        while (this.periods.length < options.count) {
+          let prev = period.datePrev(date);
+          this.periods.push({
+            startDate: prev,
+            endDate: date,
+            amounts: [],
+          });
 
-      this._pushPeriod(date);
+          date = prev;
+        }
 
-      if (options.frequency == "DAY") {
-        for (let i = 1; i < options.count; i++) {
-          date.setDate(date.getDate() + step);
-          this._pushPeriod(date, options.frequency);
-        }
-      } else if (options.frequency == "WEEK") {
-        for (let i = 1; i < options.count; i++) {
-          date.setDate(date.getDate() + (step * 14));
-          this._pushPeriod(date, options.frequency);
-        }
-      } else if (options.frequency == "MONTH") {
-        for (let i = 1; i < options.count; i++) {
-          date.setMonth(date.getMonth() + step);
-          this._pushPeriod(date, options.frequency);
-        }
-      } else if (options.frequency == "QUARTER") {
-        for (let i = 1; i < options.count; i++) {
-          date.setMonth(date.getMonth() + (step * 3));
-          this._pushPeriod(date, options.frequency);
-        }
-      } else if (options.frequency == "YEAR") {
-        for (let i = 1; i < options.count; i++) {
-          date.setYear(date.getFullYear() + step);
-          this._pushPeriod(date, options.frequency);
-        }
+        this.periods.reverse();
       }
-
-      if (step == -1) {
-        // So the points are in forwards chronological order.
-        this.periods_.reverse();
-      }
-      */
     }
 
     for (let period of this.periods) {

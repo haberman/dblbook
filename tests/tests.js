@@ -466,7 +466,6 @@ dbtest("entries", function(db, assert) {
     count: 2
   });
 
-  /*
   let groceriesBalances = groceries.newBalanceReader({
     startDate: "2015-09-22",
     frequency: "DAY",
@@ -477,7 +476,6 @@ dbtest("entries", function(db, assert) {
     frequency: "DAY",
     count: 8
   });
-  */
 
   let done = assert.async();
 
@@ -492,12 +490,23 @@ dbtest("entries", function(db, assert) {
     }
   }
 
+  function assertBalances(points, expectedBalances) {
+    assert.equal(points.length, expectedBalances.length);
+    for (let i = 0; i < Math.min(points.length, expectedBalances.length); i++) {
+      let point = points[i];
+      let [startDate, endDate, startBalance, endBalance, deltaBalance] =
+          expectedBalances[i];
+      assert.equal(point.startBalance.toString(), startBalance);
+      assert.equal(point.endBalance.toString(), endBalance);
+      assert.equal(point.delta.toString(), deltaBalance);
+    }
+  }
+
   model.Observable.whenLoaded([groceriesEntries,
                                realEntries,
-                               shortRealEntries/*,
+                               shortRealEntries,
                                groceriesBalances,
-                               realBalances*/], function() {
-    let entries = realEntries.getEntries();
+                               realBalances], function() {
     assertEntries(realEntries.getEntries(), [
       ["$1000.00", "$1000.00", paycheckTxn],
       ["-$123.45", "$876.55", groceriesTxn],
@@ -505,10 +514,32 @@ dbtest("entries", function(db, assert) {
       ["-$45.20", "$771.35", pizzaHutTxn],
     ]);
 
-    entries = shortRealEntries.getEntries();
     assertEntries(shortRealEntries.getEntries(), [
       ["-$45.20", "$771.35", pizzaHutTxn],
     ]);
+
+    assertBalances(realBalances.getPoints(), [
+      ["2015-09-22", "2015-09-23", "0",        "0",        "0"],
+      ["2015-09-23", "2015-09-24", "0",        "$1000.00", "$1000.00"],
+      ["2015-09-24", "2015-09-25", "$1000.00", "$1000.00", "0"],
+      ["2015-09-25", "2015-09-26", "$1000.00", "$876.55",  "-$123.45"],
+      ["2015-09-26", "2015-09-27", "$876.55",  "$816.55",  "-$60.00"],
+      ["2015-09-27", "2015-09-28", "$816.55",  "$771.35",  "-$45.20"],
+      ["2015-09-28", "2015-09-29", "$771.35",  "$771.35",  "0"],
+      ["2015-09-29", "2015-09-30", "$771.35",  "$771.35",  "0"],
+    ]);
+
+    assertBalances(groceriesBalances.getPoints(), [
+      ["2015-09-22", "2015-09-23", "0",        "0",        "0"],
+      ["2015-09-23", "2015-09-24", "0",        "0",        "0"],
+      ["2015-09-24", "2015-09-25", "0",        "0",        "0"],
+      ["2015-09-25", "2015-09-26", "0",        "$123.45",  "$123.45"],
+      ["2015-09-26", "2015-09-27", "$123.45",  "$143.45",  "$20.00"],
+      ["2015-09-27", "2015-09-28", "$143.45",  "$143.45",  "0"],
+      ["2015-09-28", "2015-09-29", "$143.45",  "$143.45",  "0"],
+      ["2015-09-29", "2015-09-30", "$143.45",  "$143.45",  "0"],
+    ]);
+
     done();
   });
 });
