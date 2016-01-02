@@ -131,6 +131,10 @@ export function importGnucash(xmlString: string, db: DB, rootForNew: ?Account) {
         entry: [],
       }
 
+      if (newTransaction.date) {
+        newTransaction.date = newTransaction.date.substring(0, 10);
+      }
+
       let splits = gnucashTransaction.getElementsByTagNameNS(trn, "split")
       for (let j = 0; j < splits.length; j++) {
         let gnucashSplit = splits[j];

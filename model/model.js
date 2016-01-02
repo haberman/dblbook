@@ -2345,7 +2345,7 @@ class EntryReader extends Reader {
     }
 
     if (options.endDate) {
-      let parts = options.endDate.split("-");
+      let parts = options.endDate.split("+");
       listOptions.endDate = DB.parseDate(parts[0]);
       this.endSkip = parseInt(parts[1] || "0", 10);
 

@@ -259,7 +259,7 @@ var AccountListElement = React.createClass({
 
   // TODO: componentWillReceiveProps?
   componentWillMount: function() {
-    this.balance = this.props.account.newBalanceReader({"period": "FOREVER"});
+    this.balance = this.props.account.newBalanceReader({"frequency": "FOREVER"});
   },
 
   renderTriangle: function() {
@@ -275,7 +275,7 @@ var AccountListElement = React.createClass({
   },
 
   renderBalance: function() {
-    var str = this.balance.periods()[0].end_balance.toString();
+    var str = this.balance.getPoints()[0].endBalance.toString();
     return <span>{str}</span>;
   },
 
@@ -313,21 +313,17 @@ var TransactionList = React.createClass({
 
   render: function() {
     this.subscribe(this.props.reader);
-    this.transactions = [];
+    this.entries = [];
 
-    for (let txn of this.props.reader.transactions()) {
-      var info = txn.getAccountInfo(this.props.accountGuid);
+    for (let entry of this.props.reader.getEntries()) {
       //var ts = moment(txn.data.timestamp/1000);
-      var ts = txn.data.timestamp;
       // <td>{ts.format("YYYY-MM-DD") + nbsp + ts.format("HH:mm")}</td>
-      if (info) {
-        this.transactions.push(<tr key={txn.data.guid}>
-          <td>{ts}</td>
-          <td>{txn.data.description}</td>
-          <td>{info.totalAmount.toString()}</td>
-          <td></td>
-        </tr>);
-      }
+      this.entries.push(<tr key={entry.entry.txn.data.guid}>
+        <td>{entry.entry.getDate().toISOString().substring(0, 10)}</td>
+        <td>{entry.entry.getDescription()}</td>
+        <td>{entry.entry.getAmount().toString()}</td>
+        <td>{entry.balance.toString()}</td>
+      </tr>);
     }
 
     return <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
@@ -341,7 +337,7 @@ var TransactionList = React.createClass({
       </thead>
 
       <tbody>
-        {this.transactions}
+        {this.entries}
       </tbody>
     </table>;
   }
@@ -352,12 +348,12 @@ export var Account = React.createClass({
   render: function() {
     var guid = this.getParams().guid;
     var account = this.props.db.getAccountByGuid(guid);
-    var reader = account.newTransactionReader();
+    var reader = account.newEntryReader({startDate: "2014-01-01", endDate: "2014-12-31"});
     this.subscribe(account);
     return <div>
       <h1>Account Details: {account.data.name}</h1>
       <h1>Transaction List</h1>
-      <TransactionList accountGuid={guid} reader={reader} />
+      <TransactionList reader={reader} />
     </div>
   }
 });

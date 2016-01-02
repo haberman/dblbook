@@ -457,10 +457,17 @@ dbtest("entries", function(db, assert) {
     startDate: "2015-09-22",
     count: 8
   });
+
   let realEntries = db.getRealRoot().newEntryReader({
     startDate: "2015-09-22",
     count: 5
   });
+
+  let realEntries2 = db.getRealRoot().newEntryReader({
+    startDate: "2015-09-22",
+    endDate: "2015-10-01"
+  });
+
   let shortRealEntries = db.getRealRoot().newEntryReader({
     startDate: "2015-09-27",
     count: 2
@@ -471,6 +478,7 @@ dbtest("entries", function(db, assert) {
     frequency: "DAY",
     count: 8
   });
+
   let realBalances = db.getRealRoot().newBalanceReader({
     startDate: "2015-09-22",
     frequency: "DAY",
@@ -507,12 +515,15 @@ dbtest("entries", function(db, assert) {
                                shortRealEntries,
                                groceriesBalances,
                                realBalances], function() {
-    assertEntries(realEntries.getEntries(), [
+    let expectedRealEntries = [
       ["$1000.00", "$1000.00", paycheckTxn],
       ["-$123.45", "$876.55", groceriesTxn],
       ["-$60.00", "$816.55", dinnerTxn],
       ["-$45.20", "$771.35", pizzaHutTxn],
-    ]);
+    ];
+
+    assertEntries(realEntries.getEntries(), expectedRealEntries);
+    assertEntries(realEntries2.getEntries(), expectedRealEntries);
 
     assertEntries(shortRealEntries.getEntries(), [
       ["-$45.20", "$771.35", pizzaHutTxn],
