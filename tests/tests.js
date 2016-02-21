@@ -15,7 +15,6 @@ var act = function(data) {
   return data;
 }
 
-
 function runTestWithDb(func, assert) {
   var done = assert.async();
   model.DB.open().then(function(db) {
@@ -65,7 +64,17 @@ function dbtest(name, func) {
   });
 }
 
-dbtest("transaction validity", function(db) {
+function TEST(name, func) {
+  dbtest(name, func);
+  dbtest(name + ".nodaysums",
+    (db, assert) => { model.test_NoDaySums(); func(db, assert) }
+  );
+  dbtest(name + ".nosums",
+    (db, assert) => { model.test_NoSums(); func(db, assert) }
+  );
+}
+
+TEST("transaction validity", function(db) {
   qunit.ok(!model.Transaction.isValid({}), "invalid txn 1");
 
   var account1 = db.createAccount(act({"name":"Test2"}));
@@ -111,12 +120,12 @@ qunit.test("account validity", function() {
   }), "valid account 1");
 });
 
-dbtest("empty DB", function(db) {
+TEST("empty DB", function(db) {
   qunit.ok(db.getRealRoot().children.size == 0, "empty db has no accounts");
   qunit.ok(db.getNominalRoot().children.size == 0, "empty db has no accounts");
 });
 
-dbtest("multiple DBs not allowed", function(db, assert) {
+TEST("multiple DBs not allowed", function(db, assert) {
   var err = false;
   var done = assert.async();
   try {
@@ -131,7 +140,7 @@ dbtest("multiple DBs not allowed", function(db, assert) {
   }
 });
 
-dbtest("CRUD account", function(db) {
+TEST("CRUD account", function(db) {
   throws(function() {
     db.createAccount(act({"name":"Test", "parent_guid": "not-exists" }));
   }, "can't create an account if parent doesn't exist");
@@ -168,7 +177,7 @@ dbtest("CRUD account", function(db) {
      "can create an account with an explicit GUID set.");
 });
 
-dbtest("Change notifications", function(db) {
+TEST("Change notifications", function(db) {
   var notified = 0;
   db.getRealRoot().subscribe(this, function() {
     notified += 1;
@@ -241,7 +250,7 @@ dbtest("Change notifications", function(db) {
   equal(notified, 2);
 });
 
-dbtest("restore data from IDB", function(db, assert) {
+TEST("restore data from IDB", function(db, assert) {
   // Create some data.
   var account1 = db.createAccount(act({"name":"Test"}));
   var account2 = db.createAccount(act({"name":"Test2"}));
@@ -291,7 +300,7 @@ dbtest("restore data from IDB", function(db, assert) {
   }, assert);
 })
 
-dbtest("balances", function(db, assert) {
+TEST("balances", function(db, assert) {
   var account1 = db.createAccount(act({"name":"Test"}));
   var account2 = db.createAccount(act({"name":"Test2"}));
   var sub = db.createAccount(act({"name":"Sub", "parent_guid": account1.data.guid}));
@@ -329,6 +338,7 @@ dbtest("balances", function(db, assert) {
     assertPointIsZero(getSingleArrayValue(balance2.getPoints()));
     assertPointIsZero(getSingleArrayValue(balanceSub.getPoints()));
 
+    console.log("About to create transaction");
     var txn1 = db.createTransaction({
       description: "Transaction 1",
       date: "2015-09-23",
@@ -339,7 +349,7 @@ dbtest("balances", function(db, assert) {
     });
 
     qunit.ok(txn1);
-    equal(fired1, 1);
+    equal(fired1, 1, "fired1 is 1");
     equal(firedSub, 1);
     equal(fired2, 1);
     equal(getSingleArrayValue(balance1.getPoints()).endBalance.toString(), "$1.00", "balance 1");
@@ -356,6 +366,7 @@ dbtest("balances", function(db, assert) {
     equal(getSingleArrayValue(balanceSub2.getPoints()).endBalance.toString(), "$1.00", "newly created reader works");
 
     // Update transaction and observe changes.
+    console.log("About to update transaction");
     txn1.update({
       description: "Transaction 1",
       date: "2015-09-23",
@@ -387,7 +398,7 @@ dbtest("balances", function(db, assert) {
 
 });
 
-dbtest("entries", function(db, assert) {
+TEST("entries", function(db, assert) {
   let salary = db.createAccount({
     name: "Salary",
     type: "INCOME"

@@ -1,9 +1,9 @@
 
 import * as dblbook from 'dblbook';
 import * as React from 'react';
+import * as ReactDOM from 'react-dom';
 import * as model from 'model';
-import { DefaultRoute, Link, Route, RouteHandler, NotFoundRoute } from 'react-router';
-import * as ReactRouter from 'react-router';
+import { DefaultRoute, Link, Route, Router, RouteHandler, NotFoundRoute } from 'react-router';
 
 var App = React.createClass({
   render: function () {
@@ -23,22 +23,20 @@ var App = React.createClass({
   }
 });
 
-var routes = (
-  <Route handler={App}>
-    <Route name="account" path="/accounts/:guid" handler={dblbook.Account}/>
-    <DefaultRoute name="accounts" handler={dblbook.AccountPage}/>
-    <NotFoundRoute handler={dblbook.NotFound}/>
-  </Route>
-);
-
 // Load the global database, then display the initial route once it's loaded.
 model.DB.open().then(function(db) {
   // Gnucash importer doesn't yet have a proper way to get this.
   document.db = db;
 
-  ReactRouter.run(routes, function(Handler) {
-    React.render(<Handler db={db} />, document.body);
-  });
+  var routes = (
+    <Route handler={App}>
+      <Route path="/accounts/:guid" db={db} component={dblbook.Account}/>
+      <Route path="/" component={dblbook.AccountPage}/>
+      <Route path="*" component={dblbook.NotFound}/>
+    </Route>
+  );
+
+  ReactDOM.render(<Router>{routes}</Router>, document.body);
 });
 
 /*

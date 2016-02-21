@@ -131,10 +131,11 @@ class SortedMapIterator<K, V> {
   }
 }
 
-/** dblbook.SortedMap *********************************************************/
+/** SortedMap *****************************************************************/
 
 /**
- * Sorted string -> value map.
+ * Sorted K -> V map.
+ * Sorts using built-in "<" operator over K.
  */
 class SortedMap<K, V> {
   tree: RBTree;
@@ -234,6 +235,71 @@ class SortedMap<K, V> {
       return new SortedMapIterator(iter, "prev");
     }
   }
+}
+
+/** IntervalMap ***************************************************************/
+
+/**
+ * Map of closed intervals [K, K] -> V.
+ * Supports intersection queries.
+ * Sorts keys using built-in "<" operator over K.
+ *
+ * This uses naive linear search right now, but with more work could be made
+ * cheaper.
+ *
+ * At the moment, values must be unique.  We may want to revisit this later.
+ */
+class IntervalMap<K, V> {
+  members: Map<V, [K, K]>;
+
+  constructor() {
+     this.members = new Map();
+
+    // $FlowIssue: 'Property not found in object literal'
+    Object.defineProperty(this, "size", {
+      "get": function() { return this.members.size; }
+    });
+  }
+
+  /**
+   * Sets the given key/value pair in the map, throwing an error if this key
+   * is already in the map.
+   */
+  add(low: K, high: K, val: V) {
+    if (this.members.has(val)) {
+      throw "Value was already present.";
+    }
+    this.members.set(val, [low, high]);
+    if (this.members.size > 1000) {
+      throw "Whoa, whoa";
+    }
+  }
+
+  /**
+   * Removes the given key from the map, if present.
+   * for "key".
+   */
+  delete(val: V) {
+    this.members.delete(val);
+  }
+
+  /**
+   * Returns any entries that overlap this key.
+   */
+  get(key: K): [V] {
+    let results = []
+
+    for (let [v, [low, high]] of this.members.entries()) {
+      // $FlowIssue: says "low" and "high" are of type "K." (note the dot).
+      if (key >= low && key <= high) {
+        results.push(v);
+      }
+    }
+
+    return results;
+  }
+
+  values(): Iterator<V> { return this.members.keys(); }
 }
 
 /** Decimal ***********************************************************/
@@ -587,46 +653,6 @@ class SummingPeriod extends Period {
     return this.aggregateKey + date.toISOString().substr(0, this.strLength);
   }
 
-  /**
-   * Given a startDate and endDate that are on day boundaries, returns an
-   * array of summing keys (in format "D;2015-05-05", for example) that cover
-   * this entire range.  Returns the smallest number of strings possible (by
-   * using the coarsest sums possible).
-   */
-  static getSumKeysForRange(startDate, endDate) {
-    if (!SummingPeriod.onDayBoundary(startDate) ||
-        !SummingPeriod.onDayBoundary(endDate)) {
-      throw "Sums only have day granularity, both start and end date must be " +
-          "on day boundaries.";
-    }
-
-    let sum_keys = [];
-    let date = new Date(startDate.getTime());
-
-    while (date < endDate) {
-      let i;
-
-      // Iterate over the periods from coarsest to finest, so that we create the
-      // shortest list of sum keys possible.
-      for (i = 0; i < SummingPeriod.periods2.length; i++) {
-        let period = SummingPeriod.periods2[i];
-        let nextDate = period.dateNext(date);
-        if (period.onBoundary(date) && nextDate <= endDate) {
-          sum_keys.push(period.getSumKey(date));
-          date = nextDate;
-          break;
-        }
-      }
-
-      if (i == SummingPeriod.periods2.length) {
-        throw "Not on a day boundary somehow?";
-      }
-
-    }
-
-    return sum_keys;
-  }
-
   static onDayBoundary(date) {
     return date.getHours() == 0 && date.getMinutes() == 0 &&
         date.getSeconds() == 0 && date.getMilliseconds() == 0;
@@ -648,6 +674,11 @@ SummingPeriod.periods2 = [];
 SummingPeriod.add2("YEAR",  "Y",  4, SummingPeriod.onYearBoundary);
 SummingPeriod.add2("MONTH", "M",  7, SummingPeriod.onMonthBoundary);
 SummingPeriod.add2("DAY",   "D", 10, SummingPeriod.onDayBoundary);
+
+// For testing purposes, remove some or all of our SummingPeriods, to make
+// sure that the algorithms still work.
+export function test_NoDaySums() { SummingPeriod.periods2.pop(); }
+export function test_NoSums() { SummingPeriod.periods2 = []; }
 
 
 /** Observable ********************************************************/
@@ -739,7 +770,7 @@ export class DB {
   sumsByKey:          SortedMap<string, Sum>;
 
   readers: Set<Reader>;
-  entryLists: Set<EntryList>;
+  entryLists: IntervalMap<string, EntryList>;
 
   atomicLevel: number;
   dirtyMap: Map<string, Set<DbUpdater>>;
@@ -755,10 +786,10 @@ export class DB {
    */
   constructor() {
     this.readers = new Set();
-    this.entryLists = new Set();
+    this.entryLists = new IntervalMap();
     this.accountsByGuid = new Map();
 
-    // Key is [decimal usec][guid].
+    // Key is txn._byTimeKey().
     this.transactionsByTime = new SortedMap();
     this.transactionsByGuid = new Map();
 
@@ -859,7 +890,9 @@ export class DB {
 
             for (let account of accounts) { new Account(db, account, true); }
 
-            resolve();
+            console.log("Loaded ", accounts.length, " accounts");
+
+            resolve(db);
           }
         }
       });
@@ -870,14 +903,17 @@ export class DB {
         // Load accounts.
 
         let txn = db.idb.transaction("sums", "readonly");
+        let count = 0;
 
         txn.objectStore("sums").openCursor().onsuccess = function(event) {
           let cursor = event.target.result;
           if (cursor) {
             let sum = cursor.value;
             db.sumsByKey.set(sum.key, new Sum(db, sum.key, sum));
+            count++;
             cursor.continue();
           } else {
+            console.log("Loaded ", count, " sums");
             resolve(db);
           }
         }
@@ -892,15 +928,18 @@ export class DB {
         // It's confusing but there are two different kinds of transactions going on
         // here: IndexedDB database transactions and the app-level financial
         // transactions we are loading.
-        var dbTxn = db.idb.transaction("transactions", "readonly");
+        let dbTxn = db.idb.transaction("transactions", "readonly");
+        let count = 0;
 
         dbTxn.objectStore("transactions").openCursor().onsuccess = function(event) {
           var cursor = event.target.result;
           if (cursor) {
             new Transaction(db, cursor.value, true);
+            count++;
             cursor.continue();
           } else {
             // Finished reading transactions.
+            console.log("Loaded ", count, " transaction");
             resolve(db);
           }
         }
@@ -988,7 +1027,6 @@ export class DB {
 
     let txn = this.idb.transaction(arrayFrom(this.dirtyMap.keys()), "readwrite");
     let added = [];
-    this.version++;
 
     for (let [collection, objSet] of this.dirtyMap) {
       let objectStore = txn.objectStore(collection);
@@ -1034,7 +1072,8 @@ export class DB {
 
     // Need to refresh EntryLists first because Readers may depend on their
     // contents.
-    for (let entryList of this.entryLists) {
+    let entryLists = Array.from(this.entryLists.values())
+    for (let entryList of entryLists) {
       entryList._refresh();
     }
 
@@ -1067,8 +1106,12 @@ export class DB {
    * DB.atomic() is safe to nest.
    */
   atomic(func: Function) {
-    this.atomicLevel++;
+    if (this.atomicLevel++ == 0) {
+      this.version++;
+    }
+
     func();
+
     if (--this.atomicLevel == 0) {
       this._commit();
     }
@@ -1146,6 +1189,14 @@ export class DB {
     });
   }
 
+  _invalidateEntryLists(account: Account, dateStr: string) {
+    for (let entryList of this.entryLists.get(dateStr)) {
+      if (entryList.account === account) {
+        entryList.version = this.version;
+      }
+    }
+  }
+
   _getSumByKey(account:Account, periodKey:string): Sum {
     let key = account.data.guid + ";" + periodKey;
     let ret = this.sumsByKey.get(key);
@@ -1162,13 +1213,57 @@ export class DB {
     return this._getSumByKey(account, period.getSumKey(period.roundDown(date)));
   }
 
+  /**
+   * Given a startDate and endDate that are on day boundaries, returns an
+   * array of summing keys (in format "D;2015-05-05", for example) that cover
+   * this entire range.  Returns the smallest number of strings possible (by
+   * using the coarsest sums possible).
+   */
   _getAmountReadersForPeriod(account: Account,
                              startDate: Date,
                              endDate: Date): Array<IGetAmount> {
-    // TODO: update so that it can work without day sums.
-    return SummingPeriod.getSumKeysForRange(startDate, endDate).map(
-      (key) => this._getSumByKey(account, key).toIGetAmount()
-    );
+    if (!SummingPeriod.onDayBoundary(startDate) ||
+        !SummingPeriod.onDayBoundary(endDate)) {
+      throw "Sums only have day granularity, both start and end date must be " +
+          "on day boundaries.";
+    }
+
+    let readers = [];
+    let date = new Date(startDate.getTime());
+
+    while (date < endDate) {
+      let i = 0;
+      let nextDate = DateLimits.MAX_DATE;
+
+      // Iterate over the periods from coarsest to finest, so that we create the
+      // shortest list of sum keys possible.
+      for (i = 0; i < SummingPeriod.periods2.length; i++) {
+        let period = SummingPeriod.periods2[i];
+        nextDate = period.dateNext(date);
+        if (period.onBoundary(date) && nextDate <= endDate) {
+          let sum = this._getSumByKey(account, period.getSumKey(date))
+          readers.push(sum.toIGetAmount());
+          date = nextDate;
+          break;
+        }
+      }
+
+      if (i == SummingPeriod.periods2.length) {
+        // No sum is available, need to create an EntryList for this time
+        // period.
+        let listEnd = (nextDate <= endDate) ? nextDate : endDate;
+        let list = new EntryList(account, {
+            startDate: date,
+            endDate: listEnd,
+            minCount: null
+        }).toIGetAmount()
+        readers.push(list);
+        date = listEnd;
+      }
+
+    }
+
+    return readers;
   }
 
   /**
@@ -1576,13 +1671,15 @@ class Entry {
    */
   _addToSums() {
     for (let sum of this.sums) { sum.add(this); }
+    this.txn.db._invalidateEntryLists(this.account, this.txn.data.date);
   }
 
   /**
    * Subtracts our amount from our sums.
    */
-  _subtractFromSums() {
+  _subtractFromSums(dateStr: string) {
     for (let sum of this.sums) { sum.sub(this); }
+    this.txn.db._invalidateEntryLists(this.account, dateStr);
   }
 
   /**
@@ -1711,9 +1808,9 @@ export class Transaction extends DbObject {
     }
   }
 
-  _subtractEntries() {
+  _subtractEntries(oldDate: string) {
     for (let entry of this.entries.values()) {
-      entry._subtractFromSums();
+      entry._subtractFromSums(oldDate);
     }
   }
 
@@ -1806,7 +1903,7 @@ export class Transaction extends DbObject {
         this.db.transactionsByTime.add(this._byTimeKey(), this);
       }
 
-      this._subtractEntries();
+      this._subtractEntries(oldDate);
       this._createEntries(true);
       this.dbUpdater.update();
     });
@@ -1822,7 +1919,7 @@ export class Transaction extends DbObject {
     this.db.transactionsByGuid.delete(this.data.guid);
 
     this.db.atomic(() => {
-      this._subtractEntries();
+      this._subtractEntries(this.data.date);
       this.dbUpdater.delete();
     });
   }
@@ -1935,6 +2032,7 @@ class EntryList {
   account: Account;
   entries: Array<Entry>;
   amount: ?Amount;
+  version: number;
 
   options: EntryListOptions;
 
@@ -1942,6 +2040,7 @@ class EntryList {
     this.db = account.db;
     this.account = account;
     this.options = options;
+    this.version = 0;
 
     let has = 0;
 
@@ -1954,6 +2053,15 @@ class EntryList {
     }
 
     this._refresh();
+  }
+
+  close() {
+    this.db.entryLists.delete(this);
+  }
+
+  // Implements the interface IGetAmount.
+  toIGetAmount(): IGetAmount {
+    return ((this: any): IGetAmount);
   }
 
   /**
@@ -1972,6 +2080,8 @@ class EntryList {
       return amount;
     }
   }
+
+  getVersion() { return this.version; }
 
   /**
    * Returns the list of entries for these criteria.
@@ -2002,7 +2112,7 @@ class EntryList {
           continue;
         }
 
-        if ((options.endDate && entry.getDate() > options.endDate) ||
+        if ((options.endDate && entry.getDate() >= options.endDate) ||
             (options.minCount && options.minCount == this.entries.length)) {
           break;
         }
@@ -2044,6 +2154,29 @@ class EntryList {
       }
       this.entries.reverse();
     }
+
+    this.db.entryLists.delete(this);
+
+    let firstDate = options.startDate;
+    let lastDate = options.endDate;
+
+    if (!firstDate || !lastDate) {
+      // We must have options.minCount.
+      if (!options.minCount) { throw "impossible"; }
+      if (this.entries.length < options.minCount) {
+        if (!firstDate) { firstDate = DateLimits.MIN_DATE; }
+        if (!lastDate) { lastDate = DateLimits.MAX_DATE; }
+      } else {
+        if (!firstDate) { firstDate = this.entries[0].txn.data.date; }
+        if (!lastDate) {
+          let lastEntry = this.entries[this.entries.length - 1];
+          lastDate = lastEntry.txn.data.date;
+        }
+      }
+    }
+
+    if (!firstDate || !lastDate) { throw "impossible"; }
+    this.db.entryLists.add(toMapDate(firstDate), toMapDate(lastDate), this);
   }
 }
 
@@ -2073,7 +2206,7 @@ class Reader extends Observable {
 
   _refresh() {}
 
-  release() {
+  close() {
     this.db.readers.delete(this);
   }
 }
@@ -2150,7 +2283,6 @@ class BalanceReader extends Reader {
     }
 
     this.db = account.db;
-    this.db.readers.add(this);
 
     this.periods = [];
     this.version = 0;
@@ -2276,10 +2408,6 @@ class BalanceReader extends Reader {
   getPoints(): Array<BalanceReaderPoint> {
     return this.points;
   }
-
-  release() {
-    this.db.readers.delete(this);
-  }
 }
 
 /** EntryReader ***************************************************************/
@@ -2371,6 +2499,8 @@ class EntryReader extends Reader {
       return;
     }
 
+    // Can't memoize this to the constructor because the date of our first entry
+    // (and thus the date range of the initial sums) can change.
     let initialSums = this.db._getAmountReadersForPeriod(
         this.account, DateLimits.MIN_DATE, entryListEntries[0].getDate());
 

@@ -14,7 +14,8 @@ gulp.task('dev', ['flow:start'], function() {
   doWebpack(webpackDevConfig);
   gulp.watch(['app/**/*.jsx?', 'model/**/*.js', 'tests/tests.js'],
              ['flow:status']);
-  // TODO: watch files for copy task.
+  gulp.watch(['app/*.html', 'app/*.css'],
+             ['copy']);
 });
 
 gulp.task('copy', function() {
@@ -99,7 +100,7 @@ var webpackConfig = {
     ]
   },
   devtool: "#inline-source-map",
-  noInfo: true
+  //noInfo: true
 };
 
 var webpackDevConfig = {

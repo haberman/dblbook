@@ -24,6 +24,11 @@ a:hover {
 
 .amount, .balance {
   text-align: right !important;
+  white-space: nowrap;
+}
+
+.date {
+  white-space: nowrap;
 }
 
 body {
@@ -70,6 +75,18 @@ body {
   text-decoration: none;
   background-color: #222222;
   background-color: rgba(0, 0, 0, 0.5);
+}
+
+tr .edit-txn {
+  visibility: hidden;
+}
+
+tr:hover .edit-txn {
+  visibility: visible;
+}
+
+.fa-pencil {
+  cursor: pointer;
 }
 
 .triangleOpen {

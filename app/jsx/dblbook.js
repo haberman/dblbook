@@ -1,8 +1,9 @@
 
 import * as React from 'react';
-import * as ReactRouter from 'react-router';
-import { Link } from 'react-router';
+import { Router, Link } from 'react-router';
+import * as DatePicker from 'react-datepicker';
 import { importGnucash } from 'importGnucash';
+import { importLedger } from 'importLedger';
 //import { fn } from 'moment';
 
 //var moment = fn;
@@ -161,6 +162,17 @@ function importGnucash2(event) {
   reader.readAsText(event.target.files[0]);
 }
 
+function importLedger2(event) {
+  console.log("Import Ledger: ", event);
+  let reader = new FileReader();
+  reader.onload = (function(e) {
+    importLedger(reader.result, document.db);
+  });
+  reader.onerror = (function(e) {
+  });
+  reader.readAsText(event.target.files[0]);
+}
+
 /**
  * Component for rendering the accounts page.
  */
@@ -175,6 +187,9 @@ export var AccountPage = React.createClass({
       <br/>
       <div>
         Upload a GnuCash file:<br/><input id="import" type="file" onChange={importGnucash2} />
+      </div>
+      <div>
+        Upload a Ledger file:<br/><input id="import" type="file" onChange={importLedger2} />
       </div>
     </div>;
 
@@ -290,7 +305,7 @@ var AccountListElement = React.createClass({
       {repeat(nbsp, this.props.depth * 4)}
       {this.renderTriangle()}
       &nbsp;&nbsp;&nbsp;
-      <Link to="account" params={{guid: account.data.guid}}>
+      <Link to={`/accounts/${account.data.guid}`}>
         {account.data.name}
       </Link>
     </span>;
@@ -308,23 +323,91 @@ var AccountListElement = React.createClass({
   }
 });
 
-var TransactionList = React.createClass({
+var Transaction = React.createClass({
   mixins: [DblbookSubscribeMixin],
 
   render: function() {
-    this.subscribe(this.props.reader);
-    this.entries = [];
+    this.subscribe(this.props.entry.entry.txn);
 
-    for (let entry of this.props.reader.getEntries()) {
-      //var ts = moment(txn.data.timestamp/1000);
-      // <td>{ts.format("YYYY-MM-DD") + nbsp + ts.format("HH:mm")}</td>
-      this.entries.push(<tr key={entry.entry.txn.data.guid}>
-        <td>{entry.entry.getDate().toISOString().substring(0, 10)}</td>
-        <td>{entry.entry.getDescription()}</td>
-        <td>{entry.entry.getAmount().toString()}</td>
-        <td>{entry.balance.toString()}</td>
-      </tr>);
+    let entry = this.props.entry;
+    let fromList = [];
+    let toList = [];
+    let entryList = entry.entry.txn.data.entry;
+    for (let i = 0; i < entryList.length; i++) {
+      let listEntry = entryList[i];
+      for (let currency in listEntry.amount) {
+        let amount = listEntry.amount[currency];
+        if (amount.substring(0, 1) == "-") {
+          fromList.push(listEntry.account_guid);
+        } else {
+          toList.push(listEntry.account_guid);
+        }
+      }
     }
+
+    let db = this.props.entry.entry.txn.db;
+    function guidToLabel(guid) {
+      return db.getAccountByGuid(guid).data.name;
+    }
+
+    let toLabels = toList.map(guidToLabel).join(", ");
+    let fromLabels = fromList.map(guidToLabel).join(", ");
+
+    return <tr key={entry.entry.txn.data.guid}>
+      <td className="date">{entry.entry.getDate().toISOString().substring(0, 10)}</td>
+      <td>
+         {entry.entry.getDescription() + nbsp + nbsp + nbsp}
+         <span style={{"fontSize": "smaller", "color": "gray"}}>
+           {fromLabels + "\u2192" + toLabels}
+         </span>
+         {nbsp + nbsp}
+         <i className="fa fa-pencil edit-txn" onClick={this.props.onEdit}/>
+      </td>
+      <td className="amount">{entry.entry.getAmount().toString()}</td>
+      <td className="balance">{entry.balance.toString()}</td>
+    </tr>;
+  },
+});
+
+var TransactionEditor = React.createClass({
+  getInitialState: function() {
+    var ret = {}
+    ret.data = this.props.txn ? this.props.txn.data : {};
+    ret.split = this.data && this.data.entry && this.data.entry.length > 2;
+    return ret;
+  },
+
+  render: function() {
+    console.log(DatePicker);
+    return <tr>
+      <td>
+        <DatePicker dateFormat="YYYY-MM-DD" />
+      </td>
+    </tr>;
+  }
+});
+
+var TransactionList = React.createClass({
+  mixins: [DblbookSubscribeMixin],
+
+  getInitialState: function() {
+    return {editing: new Set()};
+  },
+
+  onEdit: function(entry) {
+    this.state.editing.add(entry);
+    this.setState({editing: this.state.editing});
+  },
+
+  render: function() {
+    let entries = this.props.reader.getEntries().map(
+      (entry) => this.state.editing.has(entry) ?
+          <TransactionEditor key={entry.entry.txn.data.guid}
+                             entry={entry.entry.txn}/> :
+          <Transaction key={entry.entry.txn.data.guid}
+                       onEdit={this.onEdit.bind(this, entry)}
+                       entry={entry}/>
+    );
 
     return <table className="pure-table pure-table-horizontal" style={{"width": "100%"}}>
       <thead>
@@ -337,17 +420,17 @@ var TransactionList = React.createClass({
       </thead>
 
       <tbody>
-        {this.entries}
+        {entries}
       </tbody>
     </table>;
   }
 });
 
 export var Account = React.createClass({
-  mixins: [ReactRouter.State, DblbookSubscribeMixin],
+  mixins: [Router.State, DblbookSubscribeMixin],
   render: function() {
-    var guid = this.getParams().guid;
-    var account = this.props.db.getAccountByGuid(guid);
+    var guid = this.props.params.guid;
+    var account = this.props.route.db.getAccountByGuid(guid);
     var reader = account.newEntryReader({startDate: "2014-01-01", endDate: "2014-12-31"});
     this.subscribe(account);
     return <div>
