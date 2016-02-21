@@ -1,7 +1,7 @@
 
 import * as React from 'react';
-import { Router, Link } from 'react-router';
-import * as DatePicker from 'react-datepicker';
+import { Link } from 'react-router';
+import DatePicker from 'react-datepicker';
 import { importGnucash } from 'importGnucash';
 import { importLedger } from 'importLedger';
 //import { fn } from 'moment';
@@ -427,11 +427,12 @@ var TransactionList = React.createClass({
 });
 
 export var Account = React.createClass({
-  mixins: [Router.State, DblbookSubscribeMixin],
+  mixins: [DblbookSubscribeMixin],
   render: function() {
+    console.log(this.props);
     var guid = this.props.params.guid;
-    var account = this.props.route.db.getAccountByGuid(guid);
-    var reader = account.newEntryReader({startDate: "2014-01-01", endDate: "2014-12-31"});
+    var account = this.props.db.getAccountByGuid(guid);
+    var reader = account.newEntryReader({startDate: "2000-01-01", endDate: "2014-12-31"});
     this.subscribe(account);
     return <div>
       <h1>Account Details: {account.data.name}</h1>

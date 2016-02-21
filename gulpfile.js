@@ -21,7 +21,11 @@ gulp.task('dev', ['flow:start'], function() {
 gulp.task('copy', function() {
   gulp.src([
     'bower_components/pure/pure-min.css',])
-    .pipe(gulp.dest('build'));
+    .pipe(gulp.dest('build/css'));
+
+  gulp.src([
+    'node_modules/react-datepicker/dist/react-datepicker.min.css',])
+    .pipe(gulp.dest('build/css'));
 
   // TODO: Clean this up, the entire tree of SASS etc. isn't required
   // in the output
